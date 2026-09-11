@@ -101,18 +101,25 @@ function generateInsFile(options) {
 
   const lines = [];
   lines.push(`TITL ${title || 'structure'}`);
-  lines.push(`CELL ${wavelength ?? 0.71073} ${cell.a} ${cell.b} ${cell.c} ${cell.alpha} ${cell.beta} ${cell.gamma}`);
+
+  // SHELX only requires whitespace-separated numbers here, but XPREP-style
+  // output right-aligns every CELL/ZERR value into a fixed 9-character
+  // field so the decimal points of each value line up with its esd
+  // directly below it — a, b, c to 4 decimal places, angles (and Z) to 3.
+  const pad9 = (s) => String(s).padStart(9);
+  const fmtLen = (v) => Number.isFinite(v) ? v.toFixed(4) : '0.0000';
+  const fmtAng = (v) => Number.isFinite(v) ? v.toFixed(3) : '0.000';
+  lines.push(`CELL${pad9(wavelength ?? 0.71073)}${pad9(fmtLen(cell.a))}${pad9(fmtLen(cell.b))}${pad9(fmtLen(cell.c))}${pad9(fmtAng(cell.alpha))}${pad9(fmtAng(cell.beta))}${pad9(fmtAng(cell.gamma))}`);
 
   // ZERR Z sd(a) sd(b) sd(c) sd(alpha) sd(beta) sd(gamma) — use the esds
   // that were actually captured from the source file (CIF parentheses,
   // a loaded .ins's own ZERR line, or a .p4p's CELLSD line) where
-  // available; fields with no known esd fall back to 0.0000, same as
-  // when nothing at all was available.
-  const esdFmt = (v) => Number.isFinite(v) ? v.toFixed(4) : '0.0000';
+  // available; fields with no known esd fall back to 0, same as when
+  // nothing at all was available.
   const zerrEsds = esd
-    ? [esd.a, esd.b, esd.c, esd.alpha, esd.beta, esd.gamma].map(esdFmt).join(' ')
-    : '0.0000 0.0000 0.0000 0.0000 0.0000 0.0000';
-  lines.push(`ZERR ${z ?? 1} ${zerrEsds}`);
+    ? `${pad9(fmtLen(esd.a))}${pad9(fmtLen(esd.b))}${pad9(fmtLen(esd.c))}${pad9(fmtAng(esd.alpha))}${pad9(fmtAng(esd.beta))}${pad9(fmtAng(esd.gamma))}`
+    : `${pad9(fmtLen(0))}${pad9(fmtLen(0))}${pad9(fmtLen(0))}${pad9(fmtAng(0))}${pad9(fmtAng(0))}${pad9(fmtAng(0))}`;
+  lines.push(`ZERR${pad9(fmtAng(z ?? 1))}${zerrEsds}`);
   lines.push(`LATT ${lattNumber}`);
   for (const s of symmLines) lines.push(`SYMM ${s}`);
 

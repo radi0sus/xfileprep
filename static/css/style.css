@@ -201,7 +201,7 @@ button {
   font-family: inherit;
 }
 #determineLaueBtn, #scanAbsencesBtn, #matchSpaceGroupBtn,
-#computeEStatBtn, #generateInsBtn, #applyFormulaBtn {
+#computeEStatBtn, #generateInsBtn, #applyFormulaBtn, #insCopyBtn, #insSaveBtn {
   display: inline-block;
   margin-top: 0.5rem;
   margin-right: 0.5rem;
@@ -217,17 +217,25 @@ button {
   transition: background 0.15s ease, transform 0.05s ease;
 }
 #determineLaueBtn:hover, #scanAbsencesBtn:hover, #matchSpaceGroupBtn:hover,
-#computeEStatBtn:hover, #generateInsBtn:hover, #applyFormulaBtn:hover {
+#computeEStatBtn:hover, #generateInsBtn:hover, #applyFormulaBtn:hover, #insCopyBtn:hover, #insSaveBtn:hover {
   background: var(--accent-hover);
 }
 #determineLaueBtn:active, #scanAbsencesBtn:active, #matchSpaceGroupBtn:active,
-#computeEStatBtn:active, #generateInsBtn:active, #applyFormulaBtn:active {
+#computeEStatBtn:active, #generateInsBtn:active, #applyFormulaBtn:active, #insCopyBtn:active, #insSaveBtn:active {
   transform: scale(0.98);
 }
 #applyFormulaBtn {
   margin-bottom: 0.5rem;
   vertical-align: middle;
 }
+
+#insActions {
+  margin-top: 1rem;
+  margin-bottom: 3rem;
+  display: flex;
+  align-items: center;
+}
+#insCopyNote { font-size: 0.85rem; color: var(--success); }
 
 /* Tables */
 table {

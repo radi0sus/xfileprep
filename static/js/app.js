@@ -186,6 +186,31 @@
         α = ${fmt(esd.alpha)} · β = ${fmt(esd.beta)} · γ = ${fmt(esd.gamma)} °</small></p>`;
     }
 
+    // Shared by both CIF-loading paths (a full CIF with reflections, and a
+    // CIF with no reflection data at all — see handleFile) so cell/formula
+    // get filled in identically either way.
+    function applyCellFromCIF(cell, text) {
+      lastCellExtras = cell;
+      cellFields.a.value = cell.a;
+      cellFields.b.value = cell.b;
+      cellFields.c.value = cell.c;
+      cellFields.alpha.value = cell.alpha;
+      cellFields.beta.value = cell.beta;
+      cellFields.gamma.value = cell.gamma;
+      cellNoteEl.innerHTML = `<p><em>Filled in from CIF — edit if needed.</em></p>`;
+
+      const extras = [];
+      if (cell.z !== null) extras.push(`Z = ${cell.z}`);
+      if (cell.wavelength !== null) extras.push(`λ = ${cell.wavelength} Å`);
+      if (cell.reportedSpaceGroup !== null) extras.push(`reported space group: ${cell.reportedSpaceGroup}`);
+      cellExtraEl.innerHTML = extras.length > 0 ? `<p>${extras.join(' · ')}</p>` : '';
+
+      const formula = parseChemicalFormula(text);
+      formulaInput.value = formula ? formula.map(f => f.element + f.count).join(' ') : '';
+      formulaManuallyEdited = false; // fresh load
+      renderCellEsd(cell.esd);
+    }
+
     // A .ins carries cell + wavelength + Z + exact whole-cell composition
     // (SFAC/UNIT) but no reflections — fills in what it can, leaves any
     // already-loaded reflection data untouched.
@@ -309,8 +334,39 @@
 
       const result = parseReflectionInput(text);
 
-      if (result.reflections.length === 0 && result.skipped.length === 0) {
-        sourceInfoEl.innerHTML = `<p style="color:#b00">No reflection data found in this file.</p>`;
+      if (result.reflections.length === 0) {
+        // Sniffed as CIF, but no _refln_index_h loop or embedded
+        // _shelx_hkl_file block — many deposited/reduced CIFs only carry
+        // cell + formula, with reflections shipped separately. Rather than
+        // just erroring out, grab whatever the CIF does have (same as the
+        // .ins/.p4p "cell-only" files) and wait for a matching HKL to be
+        // dropped afterwards — in either order, since a raw HKL with no
+        // cell info already keeps whatever cell was established earlier.
+        // NB: this branch has to trigger regardless of result.skipped —
+        // every non-blank CIF line (cell/formula tags etc.) fails the HKL
+        // fallback parser and lands in `skipped`, so requiring an empty
+        // skipped list here would never fire for exactly the CIFs this is
+        // meant to catch, and the file would fall through into the normal
+        // "we have reflections" branch below with an empty array instead
+        // (0 reflections, but not rejected) — silently running the whole
+        // pipeline on nothing and rendering "undefined" ranges.
+        if (looksLikeCIF(text)) {
+          const cellOnly = extractCellFromCIF(text);
+          if (cellOnly) {
+            lastRawText = text;
+            applyCellFromCIF(cellOnly, text);
+            sourceInfoEl.innerHTML = `<p style="color:#b90">This CIF has no reflection data (no <code>_refln_index_h</code> loop or embedded HKL) —
+              cell and formula were loaded from it below. Drop the matching .hkl file to continue.</p>`;
+            summaryEl.innerHTML = '';
+            warningsEl.innerHTML = '';
+            updateCellMetricClassification();
+            autoRunPipeline(); // in case reflections were already loaded earlier and were just waiting on this cell
+            return;
+          }
+        }
+        sourceInfoEl.innerHTML = `<p style="color:#b00">${result.skipped.length > 0
+          ? `No valid reflections found — ${result.skipped.length} line(s) in this file couldn't be parsed as HKL data.`
+          : 'No reflection data found in this file.'}</p>`;
         summaryEl.innerHTML = '';
         warningsEl.innerHTML = '';
         return;
@@ -341,25 +397,11 @@
       const cell = looksLikeCIF(text) ? extractCellFromCIF(text) : null;
       lastRawText = text;
       if (cell) {
-        lastCellExtras = cell;
-        cellFields.a.value = cell.a;
-        cellFields.b.value = cell.b;
-        cellFields.c.value = cell.c;
-        cellFields.alpha.value = cell.alpha;
-        cellFields.beta.value = cell.beta;
-        cellFields.gamma.value = cell.gamma;
-        cellNoteEl.innerHTML = `<p><em>Filled in from CIF — edit if needed.</em></p>`;
-
-        const extras = [];
-        if (cell.z !== null) extras.push(`Z = ${cell.z}`);
-        if (cell.wavelength !== null) extras.push(`λ = ${cell.wavelength} Å`);
-        if (cell.reportedSpaceGroup !== null) extras.push(`reported space group: ${cell.reportedSpaceGroup}`);
-        cellExtraEl.innerHTML = extras.length > 0 ? `<p>${extras.join(' · ')}</p>` : '';
-
-        const formula = parseChemicalFormula(text);
-        formulaInput.value = formula ? formula.map(f => f.element + f.count).join(' ') : '';
-        formulaManuallyEdited = false; // fresh load
-        renderCellEsd(cell.esd);
+        // A full CIF (this one has reflections, unlike the no-HKL branch
+        // above) is always authoritative for its own cell/formula — even
+        // if a cell-only CIF or an .ins/.p4p was dropped earlier, this
+        // replaces it outright, same as dropping any fresh CIF always has.
+        applyCellFromCIF(cell, text);
       } else if (lastCellExtras || lastInsComposition) {
         // No cell info in THIS file, but an .ins/.p4p already established
         // one earlier in this session (in either drop order) — keep it,
@@ -512,6 +554,11 @@
 
     const insBtn = document.getElementById('generateInsBtn');
     const insResultEl = document.getElementById('insResult');
+    const insActionsEl = document.getElementById('insActions');
+    const insCopyBtn = document.getElementById('insCopyBtn');
+    const insSaveBtn = document.getElementById('insSaveBtn');
+    const insCopyNoteEl = document.getElementById('insCopyNote');
+    let lastGeneratedIns = null; // raw .ins text of whatever's currently shown, for the Copy/Save buttons
 
     // Builds the SHELX .ins for whichever candidate is currently selected
     // (selectedCandidateIndex) and renders it. Called automatically —
@@ -521,7 +568,12 @@
     // button, so the .ins is always kept in sync with the current pick
     // rather than requiring a click to (re)generate it.
     function generateIns() {
-      if (!lastMatchResults || lastMatchResults.length === 0) { insResultEl.innerHTML = ''; return; }
+      if (!lastMatchResults || lastMatchResults.length === 0) {
+        insResultEl.innerHTML = '';
+        insActionsEl.style.display = 'none';
+        lastGeneratedIns = null;
+        return;
+      }
 
       const top = lastMatchResults[selectedCandidateIndex].entry;
 
@@ -591,8 +643,52 @@
         ${missingNote}
         ${zNote}
         <pre style="background:#f7f7f7; padding:0.8rem; border:1px solid #ddd; overflow-x:auto;">${ins}</pre>`;
+      lastGeneratedIns = ins;
+      insActionsEl.style.display = 'flex';
+      insCopyNoteEl.textContent = '';
     }
     insBtn.addEventListener('click', generateIns);
+
+    // Clipboard API needs a secure context and can silently be unavailable
+    // on a file:// page (this app has no server) — fall back to the classic
+    // hidden-textarea + execCommand('copy') trick rather than just failing.
+    async function copyInsToClipboard() {
+      if (!lastGeneratedIns) return;
+      try {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('Clipboard API unavailable');
+        await navigator.clipboard.writeText(lastGeneratedIns);
+        insCopyNoteEl.textContent = '✓ Copied';
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = lastGeneratedIns;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+          insCopyNoteEl.textContent = '✓ Copied';
+        } catch (e2) {
+          insCopyNoteEl.textContent = 'Copy failed — please select and copy manually.';
+        }
+        document.body.removeChild(ta);
+      }
+      setTimeout(() => { insCopyNoteEl.textContent = ''; }, 2000);
+    }
+    insCopyBtn.addEventListener('click', copyInsToClipboard);
+
+    insSaveBtn.addEventListener('click', () => {
+      if (!lastGeneratedIns) return;
+      const blob = new Blob([lastGeneratedIns], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${lastLoadedFileBaseName || 'structure'}.ins`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
 
     function runSpaceGroupMatch() {
       return new Promise((resolve) => {

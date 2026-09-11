@@ -51,7 +51,15 @@ function parseCIFNumberWithEsd(value) {
   const numStr = match[1];
   const decimalIndex = numStr.indexOf('.');
   const decimalPlaces = decimalIndex === -1 ? 0 : numStr.length - decimalIndex - 1;
-  const esd = parseInt(match[2], 10) * Math.pow(10, -decimalPlaces);
+  const esdDigits = match[2];
+  // Build the esd as a decimal STRING and let parseFloat do the single
+  // rounding to the nearest double, rather than esdDigits * 10^-decimalPlaces
+  // — that multiplication compounds binary floating-point error (e.g.
+  // 6 * Math.pow(10, -4) prints as 0.0006000000000000001, not 0.0006).
+  const esdStr = esdDigits.length <= decimalPlaces
+    ? '0.' + '0'.repeat(decimalPlaces - esdDigits.length) + esdDigits
+    : esdDigits.slice(0, esdDigits.length - decimalPlaces) + '.' + esdDigits.slice(esdDigits.length - decimalPlaces);
+  const esd = parseFloat(esdStr);
   return { value: parseFloat(numStr), esd };
 }
 
