@@ -1,0 +1,277 @@
+/* XFilePrep — modern UI, light/dark via prefers-color-scheme */
+
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-alt: #f0f2f5;
+  --border: #dde1e6;
+  --text: #1a1d23;
+  --text-muted: #667085;
+  --accent: #3358e0;
+  --accent-hover: #2645bd;
+  --accent-soft: rgba(51, 88, 224, 0.10);
+  --success: #147a3d;
+  --success-soft: rgba(20, 122, 61, 0.09);
+  --error: #b3261e;
+  --warning: #93650a;
+  --neutral-muted: #8a8f98;
+  --code-bg: #f4f5f7;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161b;
+    --surface: #1c1f26;
+    --surface-alt: #21252d;
+    --border: #2e323c;
+    --text: #e7e9ec;
+    --text-muted: #9aa1ac;
+    --accent: #7d9bff;
+    --accent-hover: #9ab0ff;
+    --accent-soft: rgba(125, 155, 255, 0.14);
+    --success: #4fce84;
+    --success-soft: rgba(79, 206, 132, 0.12);
+    --error: #ff8a80;
+    --warning: #f0c05a;
+    --neutral-muted: #7d838f;
+    --code-bg: #161920;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+
+  /* Re-map the fixed inline colors app.js writes into result HTML so
+     status text/backgrounds stay legible on a dark surface. Exact hex
+     literals matched here come straight from static/js/app.js. */
+  [style*="color:#b00"]  { color: var(--error) !important; }
+  [style*="color:#080"]  { color: var(--success) !important; }
+  [style*="color:#b90"]  { color: var(--warning) !important; }
+  [style*="color:#aaa"]  { color: var(--neutral-muted) !important; }
+  [style*="color:#06c"]  { color: var(--accent) !important; }
+  [style*="background:#f7f7f7"] { background: var(--code-bg) !important; }
+  [style*="background:#f3fbf6"] { background: var(--success-soft) !important; }
+  [style*="border:1px solid #ddd"] { border-color: var(--border) !important; }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 2.5rem 1.5rem 4rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 1050px;
+  margin: 0 auto;
+}
+
+.appHeader {
+  margin-bottom: 1.75rem;
+}
+
+.appHeader h1 {
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.2rem;
+}
+
+.appHeader .tagline {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+  letter-spacing: -0.005em;
+}
+
+h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.5rem;
+}
+
+small { color: var(--text-muted); }
+
+/* Tabs */
+.tabBar {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.tabBtn {
+  padding: 0.65rem 1.1rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: inherit;
+  position: relative;
+  top: 1px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.tabBtn:hover { color: var(--text); }
+.tabBtn.active {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+  font-weight: 600;
+}
+.tabPanel { display: none; }
+.tabPanel.active {
+  display: block;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Cards / sections */
+#cellSection, #sourceInfo:not(:empty), #summary:not(:empty), #warnings:not(:empty) {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Dropzone */
+#dropZone {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2.25rem 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  background: var(--surface);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+#dropZone.dragover {
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+}
+#dropZone input[type="file"] {
+  margin-top: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+p > small {
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+
+/* Cell input table */
+#cellSection input {
+  width: 6.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+#cellSection input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+#cellSection td { border: none; padding: 0.3rem 0.6rem; text-align: left; }
+#formulaInput { width: auto; min-width: 14rem; }
+
+/* Buttons */
+button {
+  font-family: inherit;
+}
+#determineLaueBtn, #scanAbsencesBtn, #matchSpaceGroupBtn,
+#computeEStatBtn, #generateInsBtn, #applyFormulaBtn {
+  display: inline-block;
+  margin-top: 0.5rem;
+  margin-right: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  font-weight: 550;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+#determineLaueBtn:hover, #scanAbsencesBtn:hover, #matchSpaceGroupBtn:hover,
+#computeEStatBtn:hover, #generateInsBtn:hover, #applyFormulaBtn:hover {
+  background: var(--accent-hover);
+}
+#determineLaueBtn:active, #scanAbsencesBtn:active, #matchSpaceGroupBtn:active,
+#computeEStatBtn:active, #generateInsBtn:active, #applyFormulaBtn:active {
+  transform: scale(0.98);
+}
+#applyFormulaBtn {
+  margin-bottom: 0.5rem;
+  vertical-align: middle;
+}
+
+/* Tables */
+table {
+  border-collapse: collapse;
+  margin: 0.5rem 0 1.5rem;
+  width: 100%;
+}
+td, th {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.7rem;
+  text-align: right;
+  font-size: 0.88rem;
+}
+th {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+}
+#cellSection table { width: auto; }
+
+pre {
+  background: var(--code-bg);
+  color: var(--text);
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+
+/* Canvas plots paint their own themed background in JS (plot-theme.js) so
+   they follow prefers-color-scheme just like the rest of the page. */
+canvas {
+  border-radius: var(--radius-sm);
+}
+
+.plotContainer { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+.zonePlotWrap, .axialStripWrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  background: var(--surface);
+}
+.plotCaption { font-size: 0.85rem; margin-bottom: 0.3rem; color: var(--text-muted); }

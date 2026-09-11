@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XFilePrep — HKL/CIF Parser</title>
+<link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+<div class="page">
+  <header class="appHeader">
+    <h1>XFilePrep</h1>
+    <p class="tagline">Space-group determination from HKL / CIF / .ins data, with SHELX .ins generation</p>
+  </header>
+
+  <div class="tabBar" id="tabBar">
+    <button class="tabBtn active" data-tab="tab-file">1. File &amp; Cell</button>
+    <button class="tabBtn" data-tab="tab-absences">2. Absences</button>
+    <button class="tabBtn" data-tab="tab-spacegroup">3. Space Group</button>
+    <button class="tabBtn" data-tab="tab-ins">4. SHELX .ins</button>
+  </div>
+
+  <div id="tab-file" class="tabPanel active">
+    <div id="dropZone">
+      Drop a file here (.hkl, .cif, .ins, .p4p)<br>
+      <small>or</small><br>
+      <input type="file" id="hklInput" accept=".hkl,.raw,.txt,.cif,.ins,.res,.p4p">
+    </div>
+    <p><small>Tip: for a reflection file plus a separate cell-info file (e.g. .hkl + .ins, or .hkl + .p4p), drop them in either order —
+    whichever one carries the cell (.ins/.p4p/CIF) fills in the cell constants (and composition/wavelength where available), and
+    whichever one carries reflections (.hkl or a CIF with a reflection loop) triggers the automatic Laue/absences/space-group run.
+    Dropping the cell-info file after the reflections just fills in the missing piece and re-runs everything automatically. That
+    run also switches you to the "Space Group" tab once it lands on a candidate table (the SHELX .ins tab is prepared for the top
+    candidate at the same time — check it any time, no extra click needed).</small></p>
+
+    <div id="sourceInfo"></div>
+
+    <div id="cellSection">
+      <h2>Unit cell</h2>
+      <table>
+        <tr>
+          <td>a (Å)</td><td><input id="cellA" type="number" step="any"></td>
+          <td>α (°)</td><td><input id="cellAlpha" type="number" step="any"></td>
+        </tr>
+        <tr>
+          <td>b (Å)</td><td><input id="cellB" type="number" step="any"></td>
+          <td>β (°)</td><td><input id="cellBeta" type="number" step="any"></td>
+        </tr>
+        <tr>
+          <td>c (Å)</td><td><input id="cellC" type="number" step="any"></td>
+          <td>γ (°)</td><td><input id="cellGamma" type="number" step="any"></td>
+        </tr>
+      </table>
+      <p>
+        <label><strong>Chemical formula (per formula unit):</strong> <input id="formulaInput" type="text" size="30" placeholder="e.g. C11 H7 N1 S2"></label>
+        <button id="applyFormulaBtn" type="button">Apply formula</button>
+      </p>
+      <div id="formulaUpdateNote"></div>
+      <div id="cellNote"></div>
+      <div id="cellExtra"></div>
+      <div id="cellEsd"></div>
+      <div id="cellMetricResult"></div>
+      <button id="determineLaueBtn" style="display:none;">Determine Laue class (merge reflections)</button>
+      <div id="laueResult"></div>
+    </div>
+
+    <div id="summary"></div>
+    <div id="warnings"></div>
+  </div>
+
+  <div id="tab-absences" class="tabPanel">
+    <button id="scanAbsencesBtn" style="display:none;">Scan systematic absences</button>
+    <div id="absencesResult"></div>
+    <div id="absenceVizSection" style="display:none;">
+      <h3>Zone plots (reciprocal lattice)</h3>
+      <p><small>Each square/dot is one aggregated grid position (duplicate observations merged): <span style="color:#0a8a3c">●</span> filled green = at least one significant reflection measured there; <span style="color:#cfcfcf">●</span> light gray = measured but every observation was weak (I/σ &lt; 3); blank = no reflection at that position at all. A clean checkerboard or every-other-row pattern is the visual signature of a glide plane / screw axis.</small></p>
+      <div id="zonePlotsContainer" class="plotContainer"></div>
+      <h3>Axial strips</h3>
+      <div id="axialStripsContainer" class="plotContainer"></div>
+    </div>
+  </div>
+
+  <div id="tab-spacegroup" class="tabPanel">
+    <button id="matchSpaceGroupBtn" style="display:none;">Match space group candidates</button>
+    <div id="spaceGroupResult"></div>
+    <button id="computeEStatBtn" style="display:none;">Compute E² statistics (Wilson plot)</button>
+    <div id="eStatResult"></div>
+  </div>
+
+  <div id="tab-ins" class="tabPanel">
+    <p><small>Prepared automatically for the top space-group candidate as soon as a match is found, and kept in sync whenever
+    you change the selected candidate, the cell, or the formula — the button below is only there to force a manual rebuild.</small></p>
+    <button id="generateInsBtn" style="display:none;">Regenerate SHELX .ins</button>
+    <div id="insResult"></div>
+  </div>
+
+  <script src="static/js/tabs.js"></script>
+  <script src="static/js/plot-theme.js"></script>
+  <script src="static/js/hkl-parser.js"></script>
+  <script src="static/js/cif-reflections.js"></script>
+  <script src="static/js/cell-parser.js"></script>
+  <script src="static/js/cell-metric.js"></script>
+  <script src="static/js/laue-merge.js"></script>
+  <script src="static/js/absences.js"></script>
+  <script src="static/js/absences-viz.js"></script>
+  <script src="static/js/hall-symbols-data.js"></script>
+  <script src="static/js/hall-symbol-parser.js"></script>
+  <script src="static/js/reflection-conditions.js"></script>
+  <script src="static/js/candidate-matcher.js"></script>
+  <script src="static/js/ins-writer.js"></script>
+  <script src="static/js/ins-parser.js"></script>
+  <script src="static/js/p4p-parser.js"></script>
+  <script src="static/js/scattering-factors.js"></script>
+  <script src="static/js/d-spacing.js"></script>
+  <script src="static/js/e-statistics.js"></script>
+  <script src="static/js/app.js"></script>
+</div>
+</body>
+</html>
