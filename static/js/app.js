@@ -35,6 +35,7 @@
     // the formula field had no visible effect whenever a composition was
     // already known, since composition always took priority (see Bug 8).
     let formulaManuallyEdited = false;
+    let lastLoadedFileBaseName = null; // filename (no extension) of whichever file was loaded most recently, used as a TITL prefix
 
     // Renders screw-axis notation (21, 31, 32, 41, 42, 43, 61-65) with a
     // proper Unicode subscript for display, e.g. "P 1 21 1" -> "P 1 2₁ 1".
@@ -181,8 +182,8 @@
       if (!esd) { cellEsdEl.innerHTML = ''; return; }
       const fmt = (v) => (v === null || v === undefined || !Number.isFinite(v)) ? '—' : v;
       cellEsdEl.innerHTML = `<p><small>Standard uncertainties (as given by the source file):
-        a ${fmt(esd.a)} · b ${fmt(esd.b)} · c ${fmt(esd.c)} Å ·
-        α ${fmt(esd.alpha)} · β ${fmt(esd.beta)} · γ ${fmt(esd.gamma)} °</small></p>`;
+        a = ${fmt(esd.a)} · b = ${fmt(esd.b)} · c = ${fmt(esd.c)} Å ·
+        α = ${fmt(esd.alpha)} · β = ${fmt(esd.beta)} · γ = ${fmt(esd.gamma)} °</small></p>`;
     }
 
     // A .ins carries cell + wavelength + Z + exact whole-cell composition
@@ -286,6 +287,7 @@
     async function handleFile(file) {
       if (!file) return;
       const text = await file.text();
+      if (file.name) lastLoadedFileBaseName = file.name.replace(/\.[^./\\]+$/, ''); // strip extension (.hkl/.cif/.ins/.p4p/...)
 
       // A .p4p (Bruker/CrysAlisPro orientation-matrix export) carries cell +
       // esds + wavelength + formula but no reflections at all — same
@@ -547,8 +549,9 @@
         zWasEstimated = z !== null;
       }
 
+      const spaceGroupTag = top.hm.replace(/\s+/g, '');
       const ins = generateInsFile({
-        title: top.hm.replace(/\s+/g, ''),
+        title: lastLoadedFileBaseName ? `${lastLoadedFileBaseName} in ${spaceGroupTag}` : spaceGroupTag,
         cell: values,
         wavelength,
         hallSymbol: top.hall,
