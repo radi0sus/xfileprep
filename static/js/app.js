@@ -785,7 +785,33 @@
         insBtn.style.display = 'inline-block';
         generateIns(); // pre-populate the .ins tab with the top candidate right away
 
-        const rows = results.slice(0, 10).map((r, i) => `
+        const topTen = results.slice(0, 10);
+        // The candidate list is ranked across ALL space-group numbers, so a
+        // crowd of similarly-scoring pseudo-symmetric candidates from OTHER
+        // numbers can push a number's own qualifier-null (ITA standard)
+        // sibling below the visible cutoff — even when it's clearly the
+        // right partner for the top hit (e.g. #61 Pbca scoring below several
+        // unrelated #29/#54/#57/#60 candidates, while its own Pcab sibling
+        // is the #1 match). Guarantee that sibling stays reachable: if the
+        // top candidate isn't itself already standard and its standard
+        // sibling didn't make the top 10 on score alone, append it.
+        const topEntry = results[0].entry;
+        // "Standard" here means whatever this tool actually knows how to
+        // transform TO: qualifier null/"abc" (orthorhombic-style) or "b1"
+        // (monoclinic b-unique choice 1) — NOT just null/"abc". Monoclinic
+        // space groups never even HAVE a null-qualifier entry (checked:
+        // #7/9/13/14/15 only ever use a1../b1../c1..), so the earlier
+        // null/abc-only check would silently never find a monoclinic
+        // sibling at all, regardless of its rank.
+        const isStandardQualifier = q => q == null || q === 'abc' || q === 'b1';
+        const topIsStandard = isStandardQualifier(topEntry.qualifier);
+        let extraRow = null;
+        if (!topIsStandard) {
+          const siblingIndex = results.findIndex(r => r.entry.number === topEntry.number && isStandardQualifier(r.entry.qualifier));
+          if (siblingIndex >= 10) extraRow = { index: siblingIndex, result: results[siblingIndex] };
+        }
+
+        const rowHtml = (r, i) => `
           <tr>
             <td><input type="radio" name="candidateSelect" value="${i}" ${i === 0 ? 'checked' : ''}></td>
             <td>${r.entry.number}${r.entry.qualifier ? ':' + r.entry.qualifier : ''}</td>
@@ -793,7 +819,9 @@
             <td>${r.entry.hall}</td>
             <td>${(r.score * 100).toFixed(0)}%</td>
             <td>${describeSetting(r.entry)}</td>
-          </tr>`).join('');
+          </tr>`;
+        const rows = topTen.map((r, i) => rowHtml(r, i)).join('')
+          + (extraRow ? `<tr><td colspan="6"><small>↓ standard setting of the top match, shown despite its rank:</small></td></tr>${rowHtml(extraRow.result, extraRow.index)}` : '');
 
         const topScore = results[0].score;
         const topIsCentro = hallSymbolIsCentrosymmetric(results[0].entry.hall);
