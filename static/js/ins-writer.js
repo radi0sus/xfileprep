@@ -42,19 +42,21 @@ function formatFraction12(n) {
   return `${sign < 0 ? '-' : ''}${n / g}/${12 / g}`;
 }
 
-// Formats one Seitz operation as a SHELX-style SYMM line, e.g. "-X,+Y,1/2-Z".
+// Formats one Seitz operation as a SHELX-style SYMM line, e.g. "1/2-X,+Y,1/2-Z"
+// — a leading fraction comes BEFORE the sign/variable terms, matching the
+// conventional SHELX/XPREP output style, rather than appending it at the end.
 function formatSymmLine(op) {
   const vars = ['X', 'Y', 'Z'];
   const parts = [0, 1, 2].map(row => {
-    let s = '';
+    let varPart = '';
     for (let col = 0; col < 3; col++) {
       const coeff = op.R[row][col];
-      if (coeff === 1) s += `+${vars[col]}`;
-      else if (coeff === -1) s += `-${vars[col]}`;
+      if (coeff === 1) varPart += `+${vars[col]}`;
+      else if (coeff === -1) varPart += `-${vars[col]}`;
     }
     const frac = formatFraction12(op.t[row]);
-    if (frac) s += frac.startsWith('-') ? frac : `+${frac}`;
-    return s || '+0'; // shouldn't normally happen for a valid rotation row
+    if (!frac) return varPart || '+0'; // shouldn't normally happen for a valid rotation row
+    return frac + varPart;
   });
   return parts.join(',');
 }
