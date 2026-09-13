@@ -47,6 +47,43 @@
       return hm.replace(SCREW_AXIS_TOKENS, m => m[0] + m.slice(1).split('').map(d => SUBSCRIPT_DIGITS[d]).join(''));
     }
 
+    // Purely informational note for the Space Group candidate table: does
+    // THIS row's cell/hkl match what was actually measured, or would
+    // selecting it need a transform first? Never affects the .ins output.
+    //
+    // IMPORTANT: "needs a transform" is NOT the same question as "is this
+    // row's qualifier non-null". The candidate list can (and often does)
+    // contain several rows for the SAME space-group number — e.g. both
+    // 45:cab (I 2 c b) and 45:null (I b a 2) — each scored against the
+    // SAME as-measured reflections. Only whichever of them actually scores
+    // highest is the one the raw, untransformed cell/hkl natively matches;
+    // ALL other rows for that number — including the qualifier-null
+    // "standard" one, if it isn't the top scorer — need the transform
+    // applied just as much as any differently-labeled row does. Treating
+    // "qualifier === null" as "no transform needed" (the earlier version
+    // of this function) was exactly this bug: picking the standard-named
+    // but lower-scoring row showed no matrix at all, when a real dataset
+    // (I b a 2 scoring below I 2 c b for the same reflections) needs
+    // exactly the same transform to be written correctly as the non-
+    // standard row would.
+    function describeSetting(entry) {
+      if (!lastMatchResults) return '';
+      const sameNumber = lastMatchResults.filter(r => r.entry.number === entry.number);
+      const native = sameNumber.reduce((best, r) => (r.score > best.score ? r : best), sameNumber[0]).entry;
+
+      if (native.hall === entry.hall) {
+        return '<span style="color:#888">matches as measured</span>';
+      }
+      const matrix = deriveTransformMatrix(native.hall, entry.hall);
+      if (!matrix) {
+        return '<span style="color:#b90" title="No matrix in the known pool reproduces this row\'s operators from the as-measured description — likely a different axis-unique convention (e.g. a/c-unique monoclinic), not yet supported">different axis convention — matrix not found</span>';
+      }
+      const esdNote = isPurePermutation(matrix)
+        ? ''
+        : '<br><small style="color:#b90">⚠ cell-choice shear — esds not recalculated</small>';
+      return `<span style="color:#069" title="Your cell/hkl as measured natively match ${formatHM(native.hm)}. To use this row (${formatHM(entry.hm)}) instead, transform with this matrix.">as measured (${formatHM(native.hm)}) → <strong>${formatHM(entry.hm)}</strong><br><code style="font-size:0.85em">${formatHKLFMatrix(matrix)}</code>${esdNote}</span>`;
+    }
+
     const absencesBtn = document.getElementById('scanAbsencesBtn');
     const absencesResultEl = document.getElementById('absencesResult');
 
@@ -601,6 +638,19 @@
         zWasEstimated = z !== null;
       }
 
+      // If the selected candidate isn't the one whose own systematic
+      // absences the as-entered cell/hkl natively satisfy (see
+      // describeSetting, same logic), the cell needs transforming into the
+      // selected setting's frame, and the .hkl file needs the
+      // corresponding HKLF matrix so SHELXL re-indexes it to match.
+      const sameNumberResults = lastMatchResults.filter(r => r.entry.number === top.number);
+      const nativeEntry = sameNumberResults.reduce((best, r) => (r.score > best.score ? r : best), sameNumberResults[0]).entry;
+      let settingTransform = null;
+      if (nativeEntry.hall !== top.hall) {
+        const matrix = deriveTransformMatrix(nativeEntry.hall, top.hall);
+        if (matrix) settingTransform = { matrix, nativeHM: nativeEntry.hm, isPurePermutation: isPurePermutation(matrix) };
+      }
+
       const spaceGroupTag = top.hm.replace(/\s+/g, '');
       const ins = generateInsFile({
         title: lastLoadedFileBaseName ? `${lastLoadedFileBaseName} in ${spaceGroupTag}` : spaceGroupTag,
@@ -611,6 +661,7 @@
         formula: formula.length > 0 ? formula : null,
         composition: formulaManuallyEdited ? null : lastInsComposition, // exact whole-cell counts, if a .ins/.res was loaded — takes priority over formula×Z UNLESS the person has since typed their own formula
         esd: lastCellEsd, // cell esds, if the source file provided them (CIF parens / .ins ZERR / .p4p CELLSD)
+        settingTransform,
       });
 
       const hasComposition = (lastInsComposition && lastInsComposition.length > 0) || formula.length > 0;
@@ -636,10 +687,15 @@
                <strong>Compute E² statistics</strong> on the Space Group tab, then select whichever row it points to.</p>`)
         : '';
 
+      const settingNote = settingTransform
+        ? `<p style="color:#069"><small>Cell transformed from as-measured (${formatHM(settingTransform.nativeHM)}) into this setting; the .hkl file itself is untouched — SHELXL re-indexes it via the HKLF matrix.</small></p>`
+        : '';
+
       insResultEl.innerHTML = `
         <h2>SHELX .ins (space group ${top.number}${top.qualifier ? ':' + top.qualifier : ''}, ${formatHM(top.hm)})</h2>
         <p><small>Kept in sync automatically with whichever candidate is selected on the Space Group tab — edit the cell/formula fields or the selection there and this updates on its own.</small></p>
         ${tieNote}
+        ${settingNote}
         ${missingNote}
         ${zNote}
         <pre style="background:#f7f7f7; padding:0.8rem; border:1px solid #ddd; overflow-x:auto;">${ins}</pre>`;
@@ -736,6 +792,7 @@
             <td>${formatHM(r.entry.hm)}</td>
             <td>${r.entry.hall}</td>
             <td>${(r.score * 100).toFixed(0)}%</td>
+            <td>${describeSetting(r.entry)}</td>
           </tr>`).join('');
 
         const topScore = results[0].score;
@@ -754,7 +811,7 @@
           <p><small>Assumed Laue class: ${targetLaueClass} (${laueClassNote})</small></p>
           ${tieWarning}
           <table>
-            <tr><th>Use</th><th>No.</th><th>H-M symbol</th><th>Hall symbol</th><th>Match</th></tr>
+            <tr><th>Use</th><th>No.</th><th>H-M symbol</th><th>Hall symbol</th><th>Match</th><th>Setting</th></tr>
             ${rows}
           </table>
           <p><small>Pick a different row any time before generating the .ins — it always uses whichever one is selected here, not just the top-scoring one.</small></p>

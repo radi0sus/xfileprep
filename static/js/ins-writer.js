@@ -95,12 +95,35 @@ function parseChemicalFormula(cifText) {
 }
 
 // Builds the complete .ins file text.
+//
+// options.settingTransform, if given, means: what's actually measured
+// (the native fit, whichever candidate's own systematic absences the raw
+// cell/hkl obeys) differs from whichever space-group row was selected on
+// the Space Group tab. { matrix, nativeHM, isPurePermutation } — matrix
+// transforms the as-measured cell into the selected setting's frame; the
+// SAME matrix must go on the HKLF line so SHELXL re-indexes the untouched
+// .hkl file to match (see SHELX manual, HKLF instruction: "the cell,
+// symmetry and atom coordinates ... must correspond to the indices after
+// transformation using this matrix").
 function generateInsFile(options) {
-  const { title, cell, wavelength, hallSymbol, z, formula, composition, esd } = options;
+  const { title, cell: rawCell, wavelength, hallSymbol, z, formula, composition, esd: rawEsd, settingTransform } = options;
+
+  if (settingTransform && determinant3(settingTransform.matrix) <= 0) {
+    throw new Error('setting-transform: refusing to write an HKLF matrix with non-positive determinant');
+  }
+
+  const cell = settingTransform ? transformCellParameters(rawCell, settingTransform.matrix) : rawCell;
+  // Esds only survive a rigorous transform when it's a pure axis relabeling
+  // (no shear) — a genuine shear has no cell covariance matrix available
+  // here to propagate them correctly, so they're left as-is (approximate)
+  // rather than computed wrong.
+  const esd = (settingTransform && settingTransform.isPurePermutation && rawEsd) ? permuteEsds(rawEsd, settingTransform.matrix) : rawEsd;
+
   const { symmLines, lattNumber } = getSymmetryCardData(hallSymbol);
 
   const lines = [];
-  lines.push(`TITL ${title || 'structure'}`);
+  const titleSuffix = settingTransform ? ` (measured as ${settingTransform.nativeHM.replace(/\s+/g, '')})` : '';
+  lines.push(`TITL ${(title || 'structure')}${titleSuffix}`);
 
   // SHELX only requires whitespace-separated numbers here, but XPREP-style
   // output right-aligns every CELL/ZERR value into a fixed 9-character
@@ -139,7 +162,7 @@ function generateInsFile(options) {
   }
 
   lines.push('TREF');
-  lines.push('HKLF 4');
+  lines.push(settingTransform ? `HKLF 4 1 ${formatHKLFMatrix(settingTransform.matrix)}` : 'HKLF 4');
   lines.push('END');
 
   return lines.join('\n') + '\n';
