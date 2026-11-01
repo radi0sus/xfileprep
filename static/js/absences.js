@@ -30,6 +30,22 @@ function isWeak(f2, sigma) {
   return f2 / sigma < ABSENCE_SIGNIFICANCE_THRESHOLD;
 }
 
+// Pure "fraction of reflections with I/sigma >= 3" is fragile on very strong
+// data: sigmas are tiny compared with the intensity scale, so even a residual
+// signal of ~0.1% of an allowed reflection (Renninger/lambda/2 leakage, tails of
+// neighbouring strong reflections) clears 3 sigma for a noticeable share of the
+// forbidden class. A class whose MEDIAN I/sigma is below the significance
+// threshold is therefore treated as absent, unless more than
+// MAX_TAIL_PERCENT of its reflections are individually significant.
+const MAX_TAIL_PERCENT = 50;
+
+function median(values) {
+  if (values.length === 0) return null;
+  const a = [...values].sort((x, y) => x - y);
+  const n = a.length;
+  return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2;
+}
+
 function mod(n, m) {
   return ((n % m) + m) % m;
 }
@@ -48,6 +64,7 @@ function residueBuckets(reflections, valueOf, modulus) {
       count,
       fractionWeak: count > 0 ? weakCount / count : null,
       meanF2: count > 0 ? group.reduce((a, r) => a + r.f2, 0) / count : null,
+      iSigmas: group.map(r => (r.sigma > 0 ? r.f2 / r.sigma : 0)),
     };
   });
 }
@@ -84,6 +101,8 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
     ? ((forbiddenF2Sum / forbiddenCount) / allowed.meanF2) * 100
     : 0;
 
+  const medianISigma = median(forbidden.flatMap(b => b.iSigmas));
+
   let verdict;
   let reason = null;
   if (allowed.count < minCount) {
@@ -93,12 +112,20 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
     verdict = 'inconclusive';
     reason = `even the allowed class is mostly weak here (only ${allowedPresentPercent.toFixed(0)}% present) — nothing to compare the forbidden class against`;
   } else if (violationPercent > violationPercentThreshold) {
-    verdict = 'violated';
+    if (medianISigma !== null && medianISigma < ABSENCE_SIGNIFICANCE_THRESHOLD && violationPercent <= MAX_TAIL_PERCENT) {
+      // typical forbidden reflection is insignificant; the significant ones are
+      // the upper tail of residual intensity, not a real violation
+      verdict = 'holds';
+      reason = `${violationPercent.toFixed(0)}% of single forbidden reflections exceed ${ABSENCE_SIGNIFICANCE_THRESHOLD}σ, but the class median is only I/σ = ${medianISigma.toFixed(1)} `
+        + `(forbidden/allowed mean intensity ${meanRatioPercent.toFixed(2)}%) — a weak residual tail, not a violation`;
+    } else {
+      verdict = 'violated';
+    }
   } else {
     verdict = 'holds';
   }
 
-  return { verdict, reason, violationPercent, meanRatioPercent, forbiddenCount, allowedCount: allowed.count };
+  return { verdict, reason, violationPercent, meanRatioPercent, medianISigma, forbiddenCount, allowedCount: allowed.count };
 }
 
 // --- Lattice centering (whole dataset) ---------------------------------
@@ -209,4 +236,37 @@ function scanAllAbsences(reflections) {
       hk0: scanZonalConditions(reflections, 'hk0'),
     },
   };
+}
+
+
+// --- Shared with absences-viz.js -----------------------------------------
+// True if the reflection (h,k,l) is forbidden by a condition that the scan
+// judged to HOLD. The plots use this so a cell is only drawn "present" if it
+// is not systematically forbidden — keeping picture and table consistent
+// (a single-cell I/sigma test cannot tell a 0.1% leakage signal from a real
+// reflection; the class-level verdict can).
+function isForbiddenByHeldConditions(scan, h, k, l) {
+  const r = { h, k, l };
+
+  for (const [name, conds] of Object.entries(CENTERING_CANDIDATES)) {
+    if (conds.length === 0 || scan.centering[name].verdict !== 'holds') continue;
+    if (conds.some(c => mod(c.valueOf(r), c.modulus) !== 0)) return true;
+  }
+
+  for (const [axis, cls] of Object.entries(AXIAL_CLASSES)) {
+    if (!cls.select(r)) continue;
+    const idx = cls.indexOf(r);
+    for (const res of scan.axial[axis]) {
+      if (res.verdict === 'holds' && mod(idx, res.period) !== 0) return true;
+    }
+  }
+
+  for (const [zone, conds] of Object.entries(ZONAL_CONDITIONS)) {
+    if (!ZONE_SELECTORS[zone](r)) continue;
+    conds.forEach((c, i) => {
+      if (scan.zonal[zone][i].verdict === 'holds' && mod(c.valueOf(r), 2) !== 0) r._forbidden = true;
+    });
+    if (r._forbidden) return true;
+  }
+  return false;
 }

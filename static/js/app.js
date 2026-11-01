@@ -139,13 +139,16 @@
           <strong>"Inconclusive"</strong> means the test itself isn't trustworthy either way — hover a cell for the specific reason.
           It happens for one of two causes: too few reflections in the allowed (reference) class to say anything, or the allowed
           class itself is mostly weak too (common for a condition that only really shows up at higher resolution) — in both cases
-          the percentage next to it isn't meaningful evidence, whether it's 0% or high.</small></p>`;
+          the percentage next to it isn't meaningful evidence, whether it's 0% or high.
+          A condition can also read <strong>"holds"</strong> despite a non-zero percentage: if the <em>median</em> I/σ of the forbidden class is below 3
+          (hover the cell), the significant ones are just the upper tail of weak residual intensity. The plots below grey out cells forbidden by such accepted conditions.</small></p>`;
 
         document.getElementById('absenceVizSection').style.display = 'block';
         renderAbsenceVisuals(
           document.getElementById('zonePlotsContainer'),
           document.getElementById('axialStripsContainer'),
-          lastReflections
+          lastReflections,
+          scan
         );
         resolve(true);
         }, 10);

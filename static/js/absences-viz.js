@@ -61,7 +61,7 @@ function aggregateByKey(relevant, keyOf) {
   for (const r of relevant) {
     const key = keyOf(r);
     let cell = grid.get(key.id);
-    if (!cell) { cell = { ...key, strong: 0, weak: 0 }; grid.set(key.id, cell); }
+    if (!cell) { cell = { ...key, hkl: [r.h, r.k, r.l], strong: 0, weak: 0 }; grid.set(key.id, cell); }
     if (isWeak(r.f2, r.sigma)) cell.weak++; else cell.strong++;
   }
   return grid;
@@ -75,7 +75,14 @@ const ZONE_PLOT_CONFIG = {
   hk0: { select: ZONE_SELECTORS.hk0, xOf: r => r.h, yOf: r => r.k, xLabel: 'h', yLabel: 'k', fixed: 'l = 0' },
 };
 
-function renderZonePlot(canvas, reflections, zoneName) {
+// A cell is "present" if some observation is significant AND the cell is not
+// forbidden by a condition the scan judged to hold (see absences.js).
+function cellIsPresent(c, scan) {
+  if (c.strong === 0) return false;
+  return !(scan && isForbiddenByHeldConditions(scan, c.hkl[0], c.hkl[1], c.hkl[2]));
+}
+
+function renderZonePlot(canvas, reflections, zoneName, scan) {
   const colors = getPlotColors();
   const cfg = ZONE_PLOT_CONFIG[zoneName];
   const relevant = reflections.filter(cfg.select);
@@ -136,7 +143,7 @@ function renderZonePlot(canvas, reflections, zoneName) {
   // one square per aggregated grid cell
   const cellSize = Math.max(2, Math.min(plotW / (xMax - xMin), plotH / (yMax - yMin)) * 0.75);
   for (const c of cells) {
-    ctx.fillStyle = c.strong > 0 ? colors.present : colors.absent;
+    ctx.fillStyle = cellIsPresent(c, scan) ? colors.present : colors.absent;
     ctx.fillRect(px(c.x) - cellSize / 2, py(c.y) - cellSize / 2, cellSize, cellSize);
   }
 
@@ -160,7 +167,7 @@ const AXIAL_PLOT_CONFIG = {
   '00l': { select: AXIAL_CLASSES['00l'].select, indexOf: AXIAL_CLASSES['00l'].indexOf, label: 'l' },
 };
 
-function renderAxialStrip(canvas, reflections, axisName) {
+function renderAxialStrip(canvas, reflections, axisName, scan) {
   const colors = getPlotColors();
   const cfg = AXIAL_PLOT_CONFIG[axisName];
   const relevant = reflections.filter(cfg.select);
@@ -201,7 +208,7 @@ function renderAxialStrip(canvas, reflections, axisName) {
 
   const dotRadius = Math.max(2, Math.min(6, (plotW / (xMax - xMin)) * 0.35));
   for (const c of cells) {
-    ctx.fillStyle = c.strong > 0 ? colors.present : colors.absent;
+    ctx.fillStyle = cellIsPresent(c, scan) ? colors.present : colors.absent;
     ctx.beginPath();
     ctx.arc(px(c.x), midY, dotRadius, 0, 2 * Math.PI);
     ctx.fill();
@@ -219,8 +226,8 @@ function renderAxialStrip(canvas, reflections, axisName) {
 // `reflections` array the scan itself used.
 let _lastAbsenceVizArgs = null;
 
-function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections) {
-  _lastAbsenceVizArgs = [zoneContainerEl, axialContainerEl, reflections];
+function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections, scan) {
+  _lastAbsenceVizArgs = [zoneContainerEl, axialContainerEl, reflections, scan];
   zoneContainerEl.innerHTML = '';
   for (const [zoneName, cfg] of Object.entries(ZONE_PLOT_CONFIG)) {
     const wrap = document.createElement('div');
@@ -232,7 +239,7 @@ function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections) {
     wrap.appendChild(caption);
     wrap.appendChild(canvas);
     zoneContainerEl.appendChild(wrap);
-    renderZonePlot(canvas, reflections, zoneName);
+    renderZonePlot(canvas, reflections, zoneName, scan);
   }
 
   axialContainerEl.innerHTML = '';
@@ -246,7 +253,7 @@ function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections) {
     wrap.appendChild(caption);
     wrap.appendChild(canvas);
     axialContainerEl.appendChild(wrap);
-    renderAxialStrip(canvas, reflections, axisName);
+    renderAxialStrip(canvas, reflections, axisName, scan);
   }
 }
 
