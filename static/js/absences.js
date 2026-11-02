@@ -245,6 +245,24 @@ function scanAllAbsences(reflections) {
 // is not systematically forbidden — keeping picture and table consistent
 // (a single-cell I/sigma test cannot tell a 0.1% leakage signal from a real
 // reflection; the class-level verdict can).
+// The period that actually defines an axis: among the periods judged "holds",
+// the one with the lowest violation% (ties within 1 point go to the larger
+// period, e.g. a real 4_1 where periods 2 and 4 both look clean). Using EVERY
+// holding period would be wrong: a larger period such as 4 or 6 can be
+// accepted spuriously by the median rule when about half of its "forbidden"
+// class (e.g. k = 2 mod 4 on a 2_1 axis) is genuinely strong, which would
+// wrongly grey out those allowed reflections in the plots. Returns 1 if none holds.
+function effectiveAxialPeriod(results) {
+  const holding = results.filter(r => r.verdict === 'holds');
+  if (holding.length === 0) return 1;
+  let best = holding[0];
+  for (const r of holding.slice(1)) {
+    if (r.violationPercent < best.violationPercent - 1 ||
+        (Math.abs(r.violationPercent - best.violationPercent) <= 1 && r.period > best.period)) best = r;
+  }
+  return best.period;
+}
+
 function isForbiddenByHeldConditions(scan, h, k, l) {
   const r = { h, k, l };
 
@@ -256,9 +274,8 @@ function isForbiddenByHeldConditions(scan, h, k, l) {
   for (const [axis, cls] of Object.entries(AXIAL_CLASSES)) {
     if (!cls.select(r)) continue;
     const idx = cls.indexOf(r);
-    for (const res of scan.axial[axis]) {
-      if (res.verdict === 'holds' && mod(idx, res.period) !== 0) return true;
-    }
+    const period = effectiveAxialPeriod(scan.axial[axis]);
+    if (period > 1 && mod(idx, period) !== 0) return true;
   }
 
   for (const [zone, conds] of Object.entries(ZONAL_CONDITIONS)) {

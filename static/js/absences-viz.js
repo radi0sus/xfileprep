@@ -70,9 +70,9 @@ function aggregateByKey(relevant, keyOf) {
 // --- 2D zone plots (h0l, 0kl, hk0) ---------------------------------------
 
 const ZONE_PLOT_CONFIG = {
-  h0l: { select: ZONE_SELECTORS.h0l, xOf: r => r.h, yOf: r => r.l, xLabel: 'h', yLabel: 'l', fixed: 'k = 0' },
-  '0kl': { select: ZONE_SELECTORS['0kl'], xOf: r => r.k, yOf: r => r.l, xLabel: 'k', yLabel: 'l', fixed: 'h = 0' },
-  hk0: { select: ZONE_SELECTORS.hk0, xOf: r => r.h, yOf: r => r.k, xLabel: 'h', yLabel: 'k', fixed: 'l = 0' },
+  h0l: { select: ZONE_SELECTORS.h0l, xOf: r => r.h, yOf: r => r.l, xLabel: 'h', yLabel: 'l', fixed: 'k = 0', uIdx: 0, vIdx: 2 },
+  '0kl': { select: ZONE_SELECTORS['0kl'], xOf: r => r.k, yOf: r => r.l, xLabel: 'k', yLabel: 'l', fixed: 'h = 0', uIdx: 1, vIdx: 2 },
+  hk0: { select: ZONE_SELECTORS.hk0, xOf: r => r.h, yOf: r => r.k, xLabel: 'h', yLabel: 'k', fixed: 'l = 0', uIdx: 0, vIdx: 1 },
 };
 
 // A cell is "present" if some observation is significant AND the cell is not
@@ -82,7 +82,7 @@ function cellIsPresent(c, scan) {
   return !(scan && isForbiddenByHeldConditions(scan, c.hkl[0], c.hkl[1], c.hkl[2]));
 }
 
-function renderZonePlot(canvas, reflections, zoneName, scan) {
+function renderZonePlot(canvas, reflections, zoneName, scan, cell) {
   const colors = getPlotColors();
   const cfg = ZONE_PLOT_CONFIG[zoneName];
   const relevant = reflections.filter(cfg.select);
@@ -99,64 +99,24 @@ function renderZonePlot(canvas, reflections, zoneName, scan) {
   const grid = aggregateByKey(relevant, r => ({ id: `${cfg.xOf(r)},${cfg.yOf(r)}`, x: cfg.xOf(r), y: cfg.yOf(r) }));
   const cells = [...grid.values()];
   const xs = cells.map(c => c.x), ys = cells.map(c => c.y);
-  let xMin = Math.min(...xs) - 1, xMax = Math.max(...xs) + 1;
-  let yMin = Math.min(...ys) - 1, yMax = Math.max(...ys) + 1;
-  if (xMin === xMax) { xMin -= 1; xMax += 1; }
-  if (yMin === yMax) { yMin -= 1; yMax += 1; }
+  const r = { uMin: Math.min(...xs) - 1, uMax: Math.max(...xs) + 1, vMin: Math.min(...ys) - 1, vMax: Math.max(...ys) + 1 };
+  if (r.uMin === r.uMax) { r.uMin -= 1; r.uMax += 1; }
+  if (r.vMin === r.vMax) { r.vMin -= 1; r.vMax += 1; }
 
-  const margin = { left: 34, right: 10, top: 10, bottom: 28 };
-  const plotW = cssW - margin.left - margin.right;
-  const plotH = cssH - margin.top - margin.bottom;
-  const px = x => margin.left + ((x - xMin) / (xMax - xMin)) * plotW;
-  const py = y => margin.top + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
+  // true reciprocal-lattice metric (falls back to a square index grid without a cell)
+  const basis = reciprocalPlaneBasis(cell, cfg.uIdx, cfg.vIdx);
+  const box = { x: 34, y: 10, w: cssW - 44, h: cssH - 38 };
+  const frame = makeLatticeFrame(basis, r.uMin, r.uMax, r.vMin, r.vMax, box);
+  drawLatticeGrid(ctx, colors, frame, r,
+    { x: cfg.xLabel, y: cfg.yLabel },
+    (lo, hi) => integerTicks(lo, hi, niceIntStep(hi - lo)), cssW, cssH);
 
-  // gridlines + tick labels
-  const xStep = niceIntStep(xMax - xMin);
-  const yStep = niceIntStep(yMax - yMin);
-  ctx.strokeStyle = colors.grid;
-  ctx.fillStyle = colors.text;
-  ctx.font = '9px sans-serif';
-  ctx.lineWidth = 1;
-  for (const t of integerTicks(xMin, xMax, xStep)) {
-    const x = px(t);
-    ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, margin.top + plotH); ctx.stroke();
-    ctx.textAlign = 'center'; ctx.fillText(String(t), x, cssH - margin.bottom + 12);
-  }
-  for (const t of integerTicks(yMin, yMax, yStep)) {
-    const y = py(t);
-    ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + plotW, y); ctx.stroke();
-    ctx.textAlign = 'right'; ctx.fillText(String(t), margin.left - 6, y + 3);
-  }
-
-  // zero axes, emphasized
-  ctx.strokeStyle = colors.axis;
-  ctx.lineWidth = 1.2;
-  if (xMin <= 0 && xMax >= 0) {
-    const x0 = px(0);
-    ctx.beginPath(); ctx.moveTo(x0, margin.top); ctx.lineTo(x0, margin.top + plotH); ctx.stroke();
-  }
-  if (yMin <= 0 && yMax >= 0) {
-    const y0 = py(0);
-    ctx.beginPath(); ctx.moveTo(margin.left, y0); ctx.lineTo(margin.left + plotW, y0); ctx.stroke();
-  }
-
-  // one square per aggregated grid cell
-  const cellSize = Math.max(2, Math.min(plotW / (xMax - xMin), plotH / (yMax - yMin)) * 0.75);
+  // one square per aggregated lattice point
+  const cellSize = Math.max(2, frame.spacing * 0.75);
   for (const c of cells) {
     ctx.fillStyle = cellIsPresent(c, scan) ? colors.present : colors.absent;
-    ctx.fillRect(px(c.x) - cellSize / 2, py(c.y) - cellSize / 2, cellSize, cellSize);
+    ctx.fillRect(frame.px(c.x, c.y) - cellSize / 2, frame.py(c.x, c.y) - cellSize / 2, cellSize, cellSize);
   }
-
-  // axis labels
-  ctx.fillStyle = colors.text;
-  ctx.font = '11px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(cfg.xLabel, margin.left + plotW / 2, cssH - 4);
-  ctx.save();
-  ctx.translate(10, margin.top + plotH / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText(cfg.yLabel, 0, 0);
-  ctx.restore();
 }
 
 // --- 1D axial strips (h00, 0k0, 00l) -------------------------------------
@@ -226,8 +186,8 @@ function renderAxialStrip(canvas, reflections, axisName, scan) {
 // `reflections` array the scan itself used.
 let _lastAbsenceVizArgs = null;
 
-function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections, scan) {
-  _lastAbsenceVizArgs = [zoneContainerEl, axialContainerEl, reflections, scan];
+function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections, scan, cell) {
+  _lastAbsenceVizArgs = [zoneContainerEl, axialContainerEl, reflections, scan, cell];
   zoneContainerEl.innerHTML = '';
   for (const [zoneName, cfg] of Object.entries(ZONE_PLOT_CONFIG)) {
     const wrap = document.createElement('div');
@@ -239,7 +199,7 @@ function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections, sc
     wrap.appendChild(caption);
     wrap.appendChild(canvas);
     zoneContainerEl.appendChild(wrap);
-    renderZonePlot(canvas, reflections, zoneName, scan);
+    renderZonePlot(canvas, reflections, zoneName, scan, cell);
   }
 
   axialContainerEl.innerHTML = '';

@@ -7,9 +7,10 @@ Runs entirely client-side — open `index.html` directly in a browser, no server
 ## What it does
 
 1. **File & Cell** — Load reflection data (SHELX `.hkl`, CIF, `.p4p`) or a `.ins` file; enter or edit unit cell parameters and the chemical formula.
-2. **Absences** — Scans systematic absences (centering, axial, glide/zone conditions) and visualizes them as zone and axial-strip plots.
-3. **Space Group** — Determines the Laue class from the reflection data, matches candidate space groups against the observed absences, and (optionally) runs E² statistics to help resolve centrosymmetric/acentric ties that absences alone cannot distinguish. Also shows, per candidate, whether its cell/hkl match what was actually measured or would need a setting transformation (see `setting-transform.js` below).
-4. **SHELX .ins** — Generates a ready-to-use `.ins` file for the selected space group, kept in sync with the current cell, formula, and candidate selection. If the selected candidate isn't the one the as-measured cell/hkl natively fit, the cell is transformed into that setting and the corresponding matrix is written on the `HKLF` line (the `.hkl` file itself is never touched).
+2. **Laue Symmetry** — Intensity-weighted reciprocal-lattice planes (0kl, h0l, hk0) drawn with the true reciprocal metric; circle size follows the mean intensity per lattice point (averaged over exact repeats only, never over symmetry equivalents).
+3. **Absences** — Scans systematic absences (centering, axial, glide/zone conditions) and visualizes them as zone plots (true reciprocal metric) and axial strips.
+4. **Space Group** — Determines the Laue class from the reflection data, matches candidate space groups against the observed absences, and (optionally) runs E² statistics to help resolve centrosymmetric/acentric ties that absences alone cannot distinguish. Also shows, per candidate, whether its cell/hkl match what was actually measured or would need a setting transformation (see `setting-transform.js` below).
+5. **SHELX .ins** — Generates a ready-to-use `.ins` file for the selected space group, kept in sync with the current cell, formula, and candidate selection. If the selected candidate isn't the one the as-measured cell/hkl natively fit, the cell is transformed into that setting and the corresponding matrix is written on the `HKLF` line (the `.hkl` file itself is never touched).
 
 ## Project structure
 
@@ -23,6 +24,8 @@ static/
     laue-merge.js       — point-group generation, Laue class determination
     absences.js, absences-viz.js
                         — systematic absence scan + plots
+    recip-geometry.js, laue-viz.js
+                        — reciprocal-lattice plane geometry shared by the plots; Laue intensity overview
     hall-symbols-data.js, hall-symbol-parser.js, reflection-conditions.js
                         — space-group symmetry data and derived reflection conditions
     candidate-matcher.js

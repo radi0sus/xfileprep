@@ -276,6 +276,8 @@ canvas {
 }
 
 .plotContainer { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+.laueGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+@media (max-width: 760px) { .laueGrid { grid-template-columns: 1fr; } }
 .zonePlotWrap, .axialStripWrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

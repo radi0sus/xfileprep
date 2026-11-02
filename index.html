@@ -15,9 +15,10 @@
 
   <div class="tabBar" id="tabBar">
     <button class="tabBtn active" data-tab="tab-file">1. File &amp; Cell</button>
-    <button class="tabBtn" data-tab="tab-absences">2. Absences</button>
-    <button class="tabBtn" data-tab="tab-spacegroup">3. Space Group</button>
-    <button class="tabBtn" data-tab="tab-ins">4. SHELX .ins</button>
+    <button class="tabBtn" data-tab="tab-laue">2. Laue Symmetry</button>
+    <button class="tabBtn" data-tab="tab-absences">3. Absences</button>
+    <button class="tabBtn" data-tab="tab-spacegroup">4. Space Group</button>
+    <button class="tabBtn" data-tab="tab-ins">5. SHELX .ins</button>
   </div>
 
   <div id="tab-file" class="tabPanel active">
@@ -68,12 +69,30 @@
     <div id="warnings"></div>
   </div>
 
+  <div id="tab-laue" class="tabPanel">
+    <div id="laueVizSection" style="display:none;">
+      <h2>Laue symmetry overview</h2>
+      <p><small>Intensity-weighted reciprocal-lattice planes (true metric: a*, b*, c* and their angles). Each circle is the mean intensity at one lattice point,
+      averaged only over exact repeats — never over symmetry equivalents, so the symmetry of the pattern is the measured one. Circles are scaled to a shared
+      reference (99th percentile of positive intensities) so the three zones are comparable; stronger spots are capped. Tiny dots: I ≤ 0.</small></p>
+      <p><label>Circle size:
+        <select id="laueScaleSelect">
+          <option value="area" selected>area ∝ I (diameter ∝ √I)</option>
+          <option value="linear">diameter ∝ I</option>
+          <option value="log">logarithmic</option>
+        </select></label></p>
+      <div id="laueVizNote"></div>
+      <div id="laueVizContainer" class="laueGrid"></div>
+    </div>
+    <p id="laueVizEmpty"><small>Load reflection data and a cell to see the Laue overview.</small></p>
+  </div>
+
   <div id="tab-absences" class="tabPanel">
     <button id="scanAbsencesBtn" style="display:none;">Scan systematic absences</button>
     <div id="absencesResult"></div>
     <div id="absenceVizSection" style="display:none;">
       <h3>Zone plots (reciprocal lattice)</h3>
-      <p><small>Each square/dot is one aggregated grid position (duplicate observations merged): <span style="color:#0a8a3c">●</span> filled green = at least one significant reflection measured there; <span style="color:#cfcfcf">●</span> light gray = measured but every observation was weak (I/σ &lt; 3); blank = no reflection at that position at all. A clean checkerboard or every-other-row pattern is the visual signature of a glide plane / screw axis.</small></p>
+      <p><small>Drawn in the true reciprocal lattice (a*, b*, c* and their angles). Each square/dot is one aggregated lattice position (duplicate observations merged): <span style="color:#0a8a3c">●</span> filled green = at least one significant reflection measured there; <span style="color:#cfcfcf">●</span> light gray = measured but every observation was weak (I/σ &lt; 3); blank = no reflection at that position at all. A clean checkerboard or every-other-row pattern is the visual signature of a glide plane / screw axis.</small></p>
       <div id="zonePlotsContainer" class="plotContainer"></div>
       <h3>Axial strips</h3>
       <div id="axialStripsContainer" class="plotContainer"></div>
@@ -107,7 +126,9 @@
   <script src="static/js/cell-metric.js"></script>
   <script src="static/js/laue-merge.js"></script>
   <script src="static/js/absences.js"></script>
+  <script src="static/js/recip-geometry.js"></script>
   <script src="static/js/absences-viz.js"></script>
+  <script src="static/js/laue-viz.js"></script>
   <script src="static/js/hall-symbols-data.js"></script>
   <script src="static/js/hall-symbol-parser.js"></script>
   <script src="static/js/reflection-conditions.js"></script>

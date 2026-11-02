@@ -98,6 +98,21 @@
       return `<td style="${style}"${title}>${r.verdict} <small>(${r.violationPercent.toFixed(1)}%)</small></td>`;
     }
 
+    // Current cell fields as numbers, or null if any is missing (plots then fall back to an index grid).
+    function readCellOrNull() {
+      const v = {};
+      for (const k of ['a', 'b', 'c', 'alpha', 'beta', 'gamma']) v[k] = parseFloat(cellFields[k].value);
+      return Object.values(v).every(Number.isFinite) ? v : null;
+    }
+
+    function renderLaueTab() {
+      if (!lastReflections) return;
+      document.getElementById('laueVizSection').style.display = 'block';
+      document.getElementById('laueVizEmpty').style.display = 'none';
+      renderLaueOverview(document.getElementById('laueVizContainer'), document.getElementById('laueVizNote'),
+        lastReflections, readCellOrNull(), determinedLaueClass);
+    }
+
     function runAbsencesScan() {
       return new Promise((resolve) => {
         if (!lastReflections) { resolve(false); return; }
@@ -148,7 +163,8 @@
           document.getElementById('zonePlotsContainer'),
           document.getElementById('axialStripsContainer'),
           lastReflections,
-          scan
+          scan,
+          readCellOrNull()
         );
         resolve(true);
         }, 10);
@@ -501,6 +517,7 @@
       if (!Object.values(values).every(Number.isFinite)) return;
 
       await runLaueDetermination();
+      renderLaueTab();
       await runAbsencesScan();
       const matched = await runSpaceGroupMatch();
       if (matched) {
@@ -587,7 +604,7 @@
         }, 10);
       });
     }
-    laueBtn.addEventListener('click', () => { runLaueDetermination(); });
+    laueBtn.addEventListener('click', async () => { await runLaueDetermination(); renderLaueTab(); });
 
     const spaceGroupBtn = document.getElementById('matchSpaceGroupBtn');
     const spaceGroupResultEl = document.getElementById('spaceGroupResult');
