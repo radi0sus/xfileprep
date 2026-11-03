@@ -92,10 +92,17 @@
       violated: 'color:#aaa',
       inconclusive: 'color:#b90',
     };
+    // Display wording only — the internal verdict values stay holds/violated/inconclusive.
+    const VERDICT_LABEL = {
+      holds: 'satisfied',
+      violated: 'violated',
+      inconclusive: 'undetermined',
+    };
     function verdictCell(r) {
       const style = VERDICT_STYLE[r.verdict] || '';
       const title = r.reason ? ` title="${r.reason.replace(/"/g, '&quot;')}"` : '';
-      return `<td style="${style}"${title}>${r.verdict} <small>(${r.violationPercent.toFixed(1)}%)</small></td>`;
+      const label = VERDICT_LABEL[r.verdict] || r.verdict;
+      return `<td style="${style}"${title}>${label} <small title="share of forbidden reflections with I/σ ≥ 3">(${r.violationPercent.toFixed(1)}%)</small></td>`;
     }
 
     // Current cell fields as numbers, or null if any is missing (plots then fall back to an index grid).
@@ -134,28 +141,28 @@
         ).join('');
 
         absencesResultEl.innerHTML = `
-          <h2>Systematic absences</h2>
+          <h2>Reflection conditions (from systematic absences)</h2>
 
           <h3>Lattice centering (whole dataset)</h3>
-          <table><tr><th>Type</th><th>Verdict</th></tr>${centeringRows}</table>
+          <table><tr><th>Type</th><th>Status</th></tr>${centeringRows}</table>
 
           <h3>Axial conditions (screw axes)</h3>
           <table>
-            <tr><th>Axis</th><th>n refl.</th><th>period 2</th><th>period 3</th><th>period 4</th><th>period 6</th></tr>
+            <tr><th>Axis</th><th>n refl.</th><th title="reflections are allowed only if the index along this axis is a multiple of 2">index = 2n</th><th title="reflections are allowed only if the index along this axis is a multiple of 3">index = 3n</th><th title="reflections are allowed only if the index along this axis is a multiple of 4">index = 4n</th><th title="reflections are allowed only if the index along this axis is a multiple of 6">index = 6n</th></tr>
             ${axialRows}
           </table>
 
           <h3>Zonal conditions (glide planes)</h3>
-          <table><tr><th>Zone</th><th>Condition</th><th>Verdict</th></tr>${zonalRows}</table>
+          <table><tr><th>Zone</th><th>Condition</th><th>Status</th></tr>${zonalRows}</table>
 
           <p><small>Percentage = share of "forbidden" reflections that are still significant (I/σ ≥ 3) — 0% is the clean case.
           A zonal condition consistent with the lattice centering alone (e.g. an apparent glide in a zone that intersects the
           centering condition) doesn't imply an independent glide plane — check the centering result first.
-          <strong>"Inconclusive"</strong> means the test itself isn't trustworthy either way — hover a cell for the specific reason.
+          <strong>"Undetermined"</strong> means the test itself isn't trustworthy either way — hover a cell for the specific reason.
           It happens for one of two causes: too few reflections in the allowed (reference) class to say anything, or the allowed
           class itself is mostly weak too (common for a condition that only really shows up at higher resolution) — in both cases
           the percentage next to it isn't meaningful evidence, whether it's 0% or high.
-          A condition can also read <strong>"holds"</strong> despite a non-zero percentage: if the <em>median</em> I/σ of the forbidden class is below 3
+          A condition can also read <strong>"satisfied"</strong> despite a non-zero percentage: if the <em>median</em> I/σ of the forbidden class is below 3
           (hover the cell), the significant ones are just the upper tail of weak residual intensity. The plots below grey out cells forbidden by such accepted conditions.</small></p>`;
 
         document.getElementById('absenceVizSection').style.display = 'block';

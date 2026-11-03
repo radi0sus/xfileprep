@@ -22,12 +22,15 @@
 // Colors are resolved per-render via getPlotColors() (plot-theme.js) so
 // each plot follows the OS light/dark setting instead of a fixed palette.
 
-function setupCanvasForDPR(canvas, cssWidth, cssHeight, colors) {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = cssWidth * dpr;
-  canvas.height = cssHeight * dpr;
-  canvas.style.width = cssWidth + 'px';
-  canvas.style.height = cssHeight + 'px';
+// `zoom` > 1 draws the same plot larger (used by the click-to-enlarge overlay,
+// plot-zoom.js): canvas CSS size and the drawing transform scale together, so
+// everything (lines, markers, fonts) stays sharp instead of being stretched.
+function setupCanvasForDPR(canvas, cssWidth, cssHeight, colors, zoom = 1) {
+  const dpr = (window.devicePixelRatio || 1) * zoom;
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+  canvas.style.width = (cssWidth * zoom) + 'px';
+  canvas.style.height = (cssHeight * zoom) + 'px';
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssWidth, cssHeight);
@@ -82,12 +85,12 @@ function cellIsPresent(c, scan) {
   return !(scan && isForbiddenByHeldConditions(scan, c.hkl[0], c.hkl[1], c.hkl[2]));
 }
 
-function renderZonePlot(canvas, reflections, zoneName, scan, cell) {
+function renderZonePlot(canvas, reflections, zoneName, scan, cell, zoom = 1) {
   const colors = getPlotColors();
   const cfg = ZONE_PLOT_CONFIG[zoneName];
   const relevant = reflections.filter(cfg.select);
   const cssW = 300, cssH = 300;
-  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors);
+  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
 
   if (relevant.length === 0) {
     ctx.fillStyle = colors.text;
@@ -127,12 +130,12 @@ const AXIAL_PLOT_CONFIG = {
   '00l': { select: AXIAL_CLASSES['00l'].select, indexOf: AXIAL_CLASSES['00l'].indexOf, label: 'l' },
 };
 
-function renderAxialStrip(canvas, reflections, axisName, scan) {
+function renderAxialStrip(canvas, reflections, axisName, scan, zoom = 1) {
   const colors = getPlotColors();
   const cfg = AXIAL_PLOT_CONFIG[axisName];
   const relevant = reflections.filter(cfg.select);
   const cssW = 300, cssH = 70;
-  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors);
+  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
 
   if (relevant.length === 0) {
     ctx.fillStyle = colors.text;
@@ -200,6 +203,8 @@ function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections, sc
     wrap.appendChild(canvas);
     zoneContainerEl.appendChild(wrap);
     renderZonePlot(canvas, reflections, zoneName, scan, cell);
+    attachPlotZoom(wrap, caption.innerHTML, 300,
+      (cv, zoom) => renderZonePlot(cv, reflections, zoneName, scan, cell, zoom));
   }
 
   axialContainerEl.innerHTML = '';
@@ -214,6 +219,8 @@ function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections, sc
     wrap.appendChild(canvas);
     axialContainerEl.appendChild(wrap);
     renderAxialStrip(canvas, reflections, axisName, scan);
+    attachPlotZoom(wrap, caption.innerHTML, 300,
+      (cv, zoom) => renderAxialStrip(cv, reflections, axisName, scan, zoom));
   }
 }
 

@@ -8,7 +8,7 @@ Runs entirely client-side — open `index.html` directly in a browser, no server
 
 1. **File & Cell** — Load reflection data (SHELX `.hkl`, CIF, `.p4p`) or a `.ins` file; enter or edit unit cell parameters and the chemical formula.
 2. **Laue Symmetry** — Intensity-weighted reciprocal-lattice planes (0kl, h0l, hk0) drawn with the true reciprocal metric; circle size follows the mean intensity per lattice point (averaged over exact repeats only, never over symmetry equivalents).
-3. **Absences** — Scans systematic absences (centering, axial, glide/zone conditions) and visualizes them as zone plots (true reciprocal metric) and axial strips.
+3. **Absences** — Scans systematic absences (centering, axial, glide/zone conditions) and visualizes them as zone plots (true reciprocal metric) and axial strips. Click a zone plot or axial strip (here or in the Laue tab), or the Wilson plot, to enlarge it over a blurred page; Esc or a click outside closes it.
 4. **Space Group** — Determines the Laue class from the reflection data, matches candidate space groups against the observed absences, and (optionally) runs E² statistics to help resolve centrosymmetric/acentric ties that absences alone cannot distinguish. Also shows, per candidate, whether its cell/hkl match what was actually measured or would need a setting transformation (see `setting-transform.js` below).
 5. **SHELX .ins** — Generates a ready-to-use `.ins` file for the selected space group, kept in sync with the current cell, formula, and candidate selection. If the selected candidate isn't the one the as-measured cell/hkl natively fit, the cell is transformed into that setting and the corresponding matrix is written on the `HKLF` line (the `.hkl` file itself is never touched).
 
@@ -36,6 +36,7 @@ static/
     e-statistics.js     — Wilson plot / E² statistics
     ins-writer.js       — SHELX .ins generation
     plot-theme.js       — light/dark palette for canvas plots
+    plot-zoom.js        — click-to-enlarge overlay for zone plots, axial strips and the Wilson plot
     tabs.js, app.js      — UI wiring
 ```
 

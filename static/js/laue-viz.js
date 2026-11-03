@@ -36,11 +36,11 @@ function aggregateZoneIntensity(reflections, cfg) {
   return [...map.values()].map(e => ({ u: e.u, v: e.v, I: e.sum / e.n, n: e.n }));
 }
 
-function drawLaueZone(canvas, points, cfg, cell, Iref, mode) {
+function drawLaueZone(canvas, points, cfg, cell, Iref, mode, zoom = 1) {
   const colors = getPlotColors();
   const cssW = 340, cssH = 340;
-  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors);
-  canvas.style.width = '100%'; canvas.style.height = 'auto'; // scale with the grid cell (aspect ratio kept)
+  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
+  if (zoom === 1) { canvas.style.width = '100%'; canvas.style.height = 'auto'; } // scale with the grid cell (aspect ratio kept)
   if (points.length === 0) {
     ctx.fillStyle = colors.text;
     ctx.font = '12px sans-serif';
@@ -102,6 +102,8 @@ function renderLaueOverview(containerEl, noteEl, reflections, cell, laueClass) {
     wrap.appendChild(canvas);
     containerEl.appendChild(wrap);
     drawLaueZone(canvas, z.pts, z.cfg, cell, Iref, mode);
+    attachPlotZoom(wrap, caption.innerHTML, 340,
+      (cv, zoom) => drawLaueZone(cv, z.pts, z.cfg, cell, Iref, mode, zoom));
   }
 }
 

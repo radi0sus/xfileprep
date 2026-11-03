@@ -168,21 +168,20 @@ let _lastWilsonPlotArgs = null;
 
 function renderWilsonPlot(container, wilsonPoints, B, k) {
   _lastWilsonPlotArgs = [container, wilsonPoints, B, k];
-  const colors = getPlotColors();
-  const cssW = 480, cssH = 320;
-  const dpr = window.devicePixelRatio || 1;
   const canvas = document.createElement('canvas');
-  canvas.width = cssW * dpr;
-  canvas.height = cssH * dpr;
-  canvas.style.width = cssW + 'px';
-  canvas.style.height = cssH + 'px';
   container.innerHTML = '';
   container.appendChild(canvas);
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssW, cssH);
-  ctx.fillStyle = colors.bg;
-  ctx.fillRect(0, 0, cssW, cssH);
+  drawWilsonPlot(canvas, wilsonPoints, B, k);
+  // click-to-enlarge (plot-zoom.js): re-draws the same plot at a larger zoom
+  attachPlotZoom(canvas, '<strong>Wilson plot</strong>', 480,
+    (cv, zoom) => drawWilsonPlot(cv, wilsonPoints, B, k, zoom));
+}
+
+// `zoom` > 1 draws the same plot larger (see setupCanvasForDPR in absences-viz.js).
+function drawWilsonPlot(canvas, wilsonPoints, B, k, zoom = 1) {
+  const colors = getPlotColors();
+  const cssW = 480, cssH = 320;
+  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
 
   const margin = { left: 50, right: 15, top: 15, bottom: 40 };
   const plotW = cssW - margin.left - margin.right;
