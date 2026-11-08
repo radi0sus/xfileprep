@@ -35,6 +35,7 @@
     // the formula field had no visible effect whenever a composition was
     // already known, since composition always took priority (see Bug 8).
     let formulaManuallyEdited = false;
+    let lastHklExport = null; // {text, count, source} — only set when reflections came out of a CIF (never for a raw SHELX .hkl)
     let lastLoadedFileBaseName = null; // filename (no extension) of whichever file was loaded most recently, used as a TITL prefix
 
     // Renders screw-axis notation (21, 31, 32, 41, 42, 43, 61-65) with a
@@ -451,6 +452,23 @@
 
       sourceInfoEl.innerHTML = `<p><strong>Source:</strong> ${SOURCE_LABELS[source] || source}</p>`;
 
+      // HKL export (Tab 5): only offered when the reflections came out of a
+      // CIF — a raw SHELX .hkl is already in the right format. Written
+      // untransformed; the embedded block is kept verbatim, a _refln loop is
+      // re-written in SHELX format (3I4,2F8.2,I4).
+      if (source === 'raw_hkl') {
+        lastHklExport = null;
+      } else {
+        lastHklExport = {
+          source,
+          count: reflections.length,
+          text: source === 'embedded_shelx_hkl_file' && result.rawHklText
+            ? result.rawHklText.replace(/^\s*\n/, '').replace(/\s*$/, '\n')
+            : writeSHELXHKL(reflections),
+        };
+      }
+      renderHklExport();
+
       // For CIF input, cell constants are already present in the file —
       // pre-fill them instead of asking again. For raw HKL, there's no
       // cell info at all, so fields stay empty for manual entry — UNLESS
@@ -731,6 +749,32 @@
       insCopyNoteEl.textContent = '';
     }
     insBtn.addEventListener('click', generateIns);
+
+    // Tab 5: "Save as .hkl" block, visible only while lastHklExport is set.
+    const hklSaveSectionEl = document.getElementById('hklSaveSection');
+    const hklSaveInfoEl = document.getElementById('hklSaveInfo');
+    const hklSaveBtn = document.getElementById('hklSaveBtn');
+    function renderHklExport() {
+      if (!lastHklExport) { hklSaveSectionEl.style.display = 'none'; return; }
+      const origin = lastHklExport.source === 'embedded_shelx_hkl_file'
+        ? 'the HKL block embedded in the CIF (<code>_shelx_hkl_file</code>), saved verbatim'
+        : 'the CIF reflection loop (<code>_refln</code>), written in SHELX format';
+      hklSaveInfoEl.innerHTML = `<small>${lastHklExport.count} reflections from ${origin}. Indices and intensities are written exactly as read —
+        no re-indexing or merging; a setting change is handled by the HKLF line in the .ins. Saved under the same base name as the .ins.</small>`;
+      hklSaveSectionEl.style.display = 'block';
+    }
+    hklSaveBtn.addEventListener('click', () => {
+      if (!lastHklExport) return;
+      const blob = new Blob([lastHklExport.text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${lastLoadedFileBaseName || 'structure'}.hkl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
 
     // Clipboard API needs a secure context and can silently be unavailable
     // on a file:// page (this app has no server) — fall back to the classic

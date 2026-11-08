@@ -18,7 +18,7 @@
     <button class="tabBtn" data-tab="tab-laue">2. Laue Symmetry</button>
     <button class="tabBtn" data-tab="tab-absences">3. Absences</button>
     <button class="tabBtn" data-tab="tab-spacegroup">4. Space Group</button>
-    <button class="tabBtn" data-tab="tab-ins">5. SHELX .ins</button>
+    <button class="tabBtn" data-tab="tab-ins">5. SHELX .ins and .hkl</button>
   </div>
 
   <div id="tab-file" class="tabPanel active">
@@ -116,12 +116,19 @@
       <button id="insSaveBtn" type="button">Save as .ins</button>
       <span id="insCopyNote"></span>
     </div>
+
+    <div id="hklSaveSection" style="display:none;">
+      <h2>Reflection file (.hkl)</h2>
+      <p id="hklSaveInfo"><small></small></p>
+      <button id="hklSaveBtn" type="button">Save as .hkl</button>
+    </div>
   </div>
 
   <script src="static/js/tabs.js"></script>
   <script src="static/js/plot-theme.js"></script>
   <script src="static/js/plot-zoom.js"></script>
   <script src="static/js/hkl-parser.js"></script>
+  <script src="static/js/hkl-writer.js"></script>
   <script src="static/js/cif-reflections.js"></script>
   <script src="static/js/cell-parser.js"></script>
   <script src="static/js/cell-metric.js"></script>

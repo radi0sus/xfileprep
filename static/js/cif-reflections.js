@@ -119,7 +119,7 @@ function parseCIFReflections(cifText) {
   const embeddedHKL = extractCIFTextField(cifText, '_shelx_hkl_file');
   if (embeddedHKL !== null) {
     const result = parseHKL(embeddedHKL);
-    return { ...result, source: 'embedded_shelx_hkl_file' };
+    return { ...result, source: 'embedded_shelx_hkl_file', rawHklText: embeddedHKL };
   }
 
   const loopResult = parseReflnLoop(cifText);

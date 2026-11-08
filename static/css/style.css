@@ -201,7 +201,7 @@ button {
   font-family: inherit;
 }
 #determineLaueBtn, #scanAbsencesBtn, #matchSpaceGroupBtn,
-#computeEStatBtn, #generateInsBtn, #applyFormulaBtn, #insCopyBtn, #insSaveBtn {
+#computeEStatBtn, #generateInsBtn, #applyFormulaBtn, #insCopyBtn, #insSaveBtn, #hklSaveBtn {
   display: inline-block;
   margin-top: 0.5rem;
   margin-right: 0.5rem;
@@ -217,11 +217,11 @@ button {
   transition: background 0.15s ease, transform 0.05s ease;
 }
 #determineLaueBtn:hover, #scanAbsencesBtn:hover, #matchSpaceGroupBtn:hover,
-#computeEStatBtn:hover, #generateInsBtn:hover, #applyFormulaBtn:hover, #insCopyBtn:hover, #insSaveBtn:hover {
+#computeEStatBtn:hover, #generateInsBtn:hover, #applyFormulaBtn:hover, #insCopyBtn:hover, #insSaveBtn:hover, #hklSaveBtn:hover {
   background: var(--accent-hover);
 }
 #determineLaueBtn:active, #scanAbsencesBtn:active, #matchSpaceGroupBtn:active,
-#computeEStatBtn:active, #generateInsBtn:active, #applyFormulaBtn:active, #insCopyBtn:active, #insSaveBtn:active {
+#computeEStatBtn:active, #generateInsBtn:active, #applyFormulaBtn:active, #insCopyBtn:active, #insSaveBtn:active, #hklSaveBtn:active {
   transform: scale(0.98);
 }
 #applyFormulaBtn {
