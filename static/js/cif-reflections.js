@@ -142,7 +142,11 @@ function parseReflectionInput(text) {
   if (looksLikeCIF(text)) {
     const cifResult = parseCIFReflections(text);
     if (cifResult !== null) return cifResult;
-    // sniffed as CIF but no recognizable reflection data inside — fall through
+    // Sniffed as CIF but no reflection data inside (cell/formula-only CIF).
+    // Do NOT fall back to the raw-HKL parser here: it happily reads a few
+    // numeric CIF lines as "reflections" and would silently replace the
+    // real reflections loaded from a separate .hkl.
+    return { reflections: [], skipped: [], source: 'cif_no_reflections' };
   }
   return { ...parseHKL(text), source: 'raw_hkl' };
 }

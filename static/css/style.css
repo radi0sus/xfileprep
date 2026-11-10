@@ -309,3 +309,11 @@ canvas {
 .plotZoomClose:hover { color: var(--text); background: var(--surface-alt); }
 .plotZoomCanvas { display: block; cursor: zoom-out; }
 @keyframes plotZoomFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Persistent strip showing which files are loaded (visible on every tab) */
+.loadedFiles { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.fileChip { padding: 3px 10px; border-radius: 12px; font-size: 0.85em; border: 1px solid var(--border, #ccc); }
+.fileChip.ok { background: rgba(40,160,80,0.12); border-color: rgba(40,160,80,0.5); }
+.fileChip.missing { opacity: 0.6; }
+.fileChip.hint { background: rgba(200,150,0,0.14); border-color: rgba(200,150,0,0.55); }
+.fileChip.hint button { margin-left: 4px; }

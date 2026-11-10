@@ -36,6 +36,36 @@
     // already known, since composition always took priority (see Bug 8).
     let formulaManuallyEdited = false;
     let lastHklExport = null; // {text, count, source} — only set when reflections came out of a CIF (never for a raw SHELX .hkl)
+    // Which file supplied what — shown in a strip above the tabs so it stays
+    // visible on every tab (the app otherwise "forgets" earlier drops visually).
+    const loadedFiles = { reflections: null, cell: null };
+    let awaitingJump = false; // pipeline is ready, but we stayed on tab 1 because the formula is still missing
+    let batchDepth = 0;      // >0 while several files are processed in one go
+    let pendingRun = false;  // pipeline run requested during a batch, executed once at its end
+    const loadedFilesEl = document.getElementById('loadedFiles');
+    function noteLoaded(kind, name, extra) {
+      loadedFiles[kind] = { name: name || '(unnamed)', extra: extra || '' };
+      renderLoadedFiles();
+    }
+    function renderLoadedFiles() {
+      if (!loadedFilesEl) return;
+      const chip = (label, item) => item
+        ? `<span class="fileChip ok">✔ ${label}: <strong>${item.name.replace(/[<>&]/g, '')}</strong>${item.extra ? ` <small>${item.extra}</small>` : ''}</span>`
+        : `<span class="fileChip missing">○ ${label}: not loaded yet</span>`;
+      loadedFilesEl.innerHTML = chip('Reflections', loadedFiles.reflections) + chip('Cell', loadedFiles.cell)
+        + (awaitingJump
+          ? ` <span class="fileChip hint">Results ready. No formula yet — drop the CIF/.ins/.p4p with it, or
+              <button type="button" data-go="tab-spacegroup">continue to Space Group →</button></span>`
+          : '');
+    }
+    if (loadedFilesEl) loadedFilesEl.addEventListener('click', (e) => {
+      const go = e.target.closest && e.target.closest('[data-go]');
+      if (!go) return;
+      awaitingJump = false;
+      renderLoadedFiles();
+      window.switchTab(go.dataset.go);
+    });
+    renderLoadedFiles();
     let lastLoadedFileBaseName = null; // filename (no extension) of whichever file was loaded most recently, used as a TITL prefix
 
     // Renders screw-axis notation (21, 31, 32, 41, 42, 43, 61-65) with a
@@ -384,6 +414,7 @@
       // than forcing it through the reflection-parsing path.
       if (looksLikeP4P(text)) {
         handleP4PFile(text);
+        noteLoaded('cell', file.name);
         return;
       }
 
@@ -393,6 +424,7 @@
       // "no reflection data found".
       if (looksLikeSHELXIns(text)) {
         handleInsFile(text);
+        noteLoaded('cell', file.name);
         return;
       }
 
@@ -424,6 +456,7 @@
             summaryEl.innerHTML = '';
             warningsEl.innerHTML = '';
             updateCellMetricClassification();
+            noteLoaded('cell', file.name);
             autoRunPipeline(); // in case reflections were already loaded earlier and were just waiting on this cell
             return;
           }
@@ -438,6 +471,7 @@
 
       const { reflections, skipped, source } = result;
       lastReflections = reflections;
+      noteLoaded('reflections', file.name, `(${reflections.length} refl.)`);
       determinedLaueClass = null;
       determinedLaueClassSource = null;
       laueBtn.style.display = 'inline-block';
@@ -482,7 +516,20 @@
         // above) is always authoritative for its own cell/formula — even
         // if a cell-only CIF or an .ins/.p4p was dropped earlier, this
         // replaces it outright, same as dropping any fresh CIF always has.
-        applyCellFromCIF(cell, text);
+        // Exception: a reflection-only file (e.g. a COD-style .hkl in CIF
+        // format) usually repeats the cell but carries no formula/Z. If
+        // the very same cell is already loaded together with a formula
+        // (from the real CIF/.ins dropped before), keep that richer data
+        // instead of wiping the formula.
+        const sameCellAsLoaded = ['a', 'b', 'c', 'alpha', 'beta', 'gamma']
+          .every(k => Math.abs(parseFloat(cellFields[k].value) - cell[k]) < 1e-3);
+        const fileHasNoFormula = !parseChemicalFormula(text);
+        if (fileHasNoFormula && sameCellAsLoaded && (formulaInput.value.trim() !== '' || lastInsComposition)) {
+          cellNoteEl.innerHTML = `<p><em>Same cell as already loaded — keeping formula/Z from the earlier file.</em></p>`;
+        } else {
+          applyCellFromCIF(cell, text);
+          noteLoaded('cell', file.name);
+        }
       } else if (lastCellExtras || lastInsComposition) {
         // No cell info in THIS file, but an .ins/.p4p already established
         // one earlier in this session (in either drop order) — keep it,
@@ -533,7 +580,31 @@
     // instead of requiring three separate button clicks. Safe to call
     // repeatedly (e.g. after editing the cell by hand) — each step is a
     // no-op if its own prerequisites aren't met yet.
+    async function handleFiles(fileList) {
+      const list = Array.from(fileList || []).filter(Boolean);
+      if (list.length === 0) return;
+      // Files that carry reflections go first, cell/formula-only files
+      // (.ins/.p4p/CIF without reflection loop) last, so the latter can
+      // add their formula/composition on top instead of being overwritten.
+      const texts = await Promise.all(list.map(f => f.text()));
+      const rank = (t) => (looksLikeP4P(t) || looksLikeSHELXIns(t)) ? 1 : (parseReflectionInput(t).reflections.length > 0 ? 0 : 1);
+      const ordered = list.map((f, i) => ({ f, r: rank(texts[i]) })).sort((a, b) => a.r - b.r).map(x => x.f);
+      batchDepth++;
+      try {
+        for (const f of ordered) await handleFile(f);
+      } finally {
+        batchDepth--;
+      }
+      if (batchDepth === 0 && pendingRun) {
+        pendingRun = false;
+        await autoRunPipeline();
+      }
+    }
+
     async function autoRunPipeline() {
+      // While several files are being read in one go, run the chain only
+      // once at the end (otherwise it would run — and jump — per file).
+      if (batchDepth > 0) { pendingRun = true; return; }
       if (!lastReflections) return;
       const values = {
         a: parseFloat(cellFields.a.value), b: parseFloat(cellFields.b.value), c: parseFloat(cellFields.c.value),
@@ -551,8 +622,26 @@
         // leave it for a manual click once the formula is entered.
         await runEStatistics(true);
       }
-      if (matched && typeof window.switchTab === 'function') {
-        window.switchTab('tab-spacegroup');
+      // Jump to the candidate table only while the person is still on the
+      // upload tab. Anyone who is already further along (e.g. adding the
+      // CIF afterwards from another tab) stays exactly where they are.
+      const activePanel = document.querySelector('.tabPanel.active');
+      const compositionKnown = formulaInput.value.trim() !== '' || !!lastInsComposition;
+      if (matched && typeof window.switchTab === 'function' && activePanel && activePanel.id === 'tab-file') {
+        if (compositionKnown) {
+          // Everything needed is in: show the candidates.
+          awaitingJump = false;
+          window.switchTab('tab-spacegroup');
+        } else {
+          // Reflections + cell are there, but formula/Z (usually from the
+          // CIF) is not — likely another file is still coming. Stay on the
+          // upload tab instead of jumping away from it.
+          awaitingJump = true;
+        }
+        renderLoadedFiles();
+      } else if (matched && awaitingJump) {
+        awaitingJump = false;
+        renderLoadedFiles();
       }
     }
 
@@ -1070,18 +1159,17 @@
       });
     }
 
-    input.addEventListener('change', (e) => handleFile(e.target.files[0]));
+    input.addEventListener('change', (e) => { handleFiles(e.target.files); input.value = ''; });
 
-    dropZone.addEventListener('dragover', (e) => {
+    // The whole window is a drop target, so more files can be added from
+    // any tab without going back to tab 1. Several files at once are fine.
+    let dragDepth = 0;
+    document.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; dropZone.classList.add('dragover'); });
+    document.addEventListener('dragover', (e) => { e.preventDefault(); });
+    document.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) dropZone.classList.remove('dragover'); });
+    document.addEventListener('drop', (e) => {
       e.preventDefault();
-      dropZone.classList.add('dragover');
-    });
-    dropZone.addEventListener('dragleave', () => {
+      dragDepth = 0;
       dropZone.classList.remove('dragover');
-    });
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      const file = e.dataTransfer.files[0];
-      handleFile(file);
+      if (e.dataTransfer && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
     });

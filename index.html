@@ -13,6 +13,8 @@
     <p class="tagline">Space-group determination from HKL / CIF / .ins data, with SHELX .ins generation</p>
   </header>
 
+  <div id="loadedFiles" class="loadedFiles"></div>
+
   <div class="tabBar" id="tabBar">
     <button class="tabBtn active" data-tab="tab-file">1. File &amp; Cell</button>
     <button class="tabBtn" data-tab="tab-laue">2. Laue Symmetry</button>
@@ -23,15 +25,15 @@
 
   <div id="tab-file" class="tabPanel active">
     <div id="dropZone">
-      Drop a file here (.hkl, .cif, .ins, .p4p)<br>
+      Drop file(s) here — anywhere in the window — (.hkl, .cif, .ins, .p4p)<br>
       <small>or</small><br>
-      <input type="file" id="hklInput" accept=".hkl,.raw,.txt,.cif,.ins,.res,.p4p">
+      <input type="file" id="hklInput" multiple accept=".hkl,.raw,.txt,.cif,.ins,.res,.p4p">
     </div>
     <p><small>Tip: for a reflection file plus a separate cell-info file (e.g. .hkl + .ins, or .hkl + .p4p), drop them in either order —
     whichever one carries the cell (.ins/.p4p/CIF) fills in the cell constants (and composition/wavelength where available), and
     whichever one carries reflections (.hkl or a CIF with a reflection loop) triggers the automatic Laue/absences/space-group run.
     Dropping the cell-info file after the reflections just fills in the missing piece and re-runs everything automatically. That
-    run also switches you to the "Space Group" tab once it lands on a candidate table (the SHELX .ins tab is prepared for the top
+    run switches you to the "Space Group" tab once it lands on a candidate table (only if you are still on this tab; you can also add files from any tab) (the SHELX .ins tab is prepared for the top
     candidate at the same time — check it any time, no extra click needed).</small></p>
 
     <div id="sourceInfo"></div>
