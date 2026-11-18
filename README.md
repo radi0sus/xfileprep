@@ -8,8 +8,8 @@ Runs entirely client-side — open `index.html` directly in a browser, no server
 
 1. **File & Cell** — Load reflection data (SHELX `.hkl`, CIF, `.p4p`) or a `.ins` file; enter or edit unit cell parameters and the chemical formula.
 2. **Laue Symmetry** — Intensity-weighted reciprocal-lattice planes (0kl, h0l, hk0) drawn with the true reciprocal metric; circle size follows the mean intensity per lattice point (averaged over exact repeats only, never over symmetry equivalents).
-3. **Absences** — Scans systematic absences (centering, axial, glide/zone conditions) and visualizes them as zone plots (true reciprocal metric) and axial strips. Click a zone plot or axial strip (here or in the Laue tab), or the Wilson plot, to enlarge it over a blurred page; Esc or a click outside closes it.
-4. **Space Group** — Determines the Laue class from the reflection data, matches candidate space groups against the observed absences, and (optionally) runs E² statistics to help resolve centrosymmetric/acentric ties that absences alone cannot distinguish. Also shows, per candidate, whether its cell/hkl match what was actually measured or would need a setting transformation (see `setting-transform.js` below).
+3. **Absences** — Scans systematic absences (centering, axial, glide/zone conditions) and visualizes them as zone plots (true reciprocal metric) and axial strips. Click a zone plot or axial strip (here or in the Laue tab), the Wilson plot or the N(z) plot, to enlarge it over a blurred page; Esc or a click outside closes it.
+4. **Space Group** — Determines the Laue class from the reflection data, matches candidate space groups against the observed absences, and (optionally) runs E² statistics (⟨|E²−1|⟩, Wilson plot and an N(z) test against the centric, acentric and twinned-acentric curves) to help resolve centrosymmetric/acentric ties that absences alone cannot distinguish. Centering-absent reflections of the selected candidate's lattice are excluded first. Also shows, per candidate, whether its cell/hkl match what was actually measured or would need a setting transformation (see `setting-transform.js` below).
 5. **SHELX .ins and .hkl** — Generates a ready-to-use `.ins` file for the selected space group, kept in sync with the current cell, formula, and candidate selection. If the selected candidate isn't the one the as-measured cell/hkl natively fit, the cell is transformed into that setting and the corresponding matrix is written on the `HKLF` line (the `.hkl` file itself is never touched). If the reflections came from a CIF (a `_refln` loop or an embedded `_shelx_hkl_file` block) rather than from a raw SHELX `.hkl`, this tab also offers to save them as a SHELX `.hkl` — untransformed, same base name as the `.ins`.
 
 ## Project structure
@@ -33,7 +33,7 @@ static/
     setting-transform.js
                         — derives+verifies a cell/HKL transformation matrix between two settings of the same space-group number, from their actual symmetry operators (not a trusted name lookup)
     ins-parser.js, p4p-parser.js, scattering-factors.js, d-spacing.js
-    e-statistics.js     — Wilson plot / E² statistics
+    e-statistics.js     — Wilson plot / E² statistics / N(z) test / lattice filter
     ins-writer.js       — SHELX .ins generation
     hkl-writer.js       — SHELX .hkl export for reflections that came from a CIF
     plot-theme.js       — light/dark palette for canvas plots

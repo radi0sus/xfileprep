@@ -42,6 +42,103 @@ function linearRegression(points) {
   return { slope, intercept };
 }
 
+// --- Reference cumulative distributions of z = E² (intensity) --------------
+// N(z) = fraction of reflections with E² <= z (Howells, Phillips & Rogers
+// 1950). Ideal, untwinned data:
+//   acentric:                  N(z) = 1 - exp(-z)
+//   centrosymmetric:           N(z) = erf(sqrt(z/2))
+//   acentric, perfect twin:    N(z) = 1 - (1 + 2z) exp(-2z)   (hemihedral, α = 0.5)
+// The twinned curve looks "more centrosymmetric" at high z but has far
+// fewer weak reflections than the centric curve — that shape difference is
+// what separates a twinned acentric crystal from a truly centric one.
+
+// Abramowitz & Stegun 7.1.26 (|error| < 1.5e-7) — plenty for a plot and a
+// Kolmogorov distance; Math.erf does not exist in JavaScript.
+function erfApprox(x) {
+  const sign = x < 0 ? -1 : 1;
+  x = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * x);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return sign * y;
+}
+const NZ_REFERENCE = {
+  centrosymmetric: z => erfApprox(Math.sqrt(Math.max(0, z) / 2)),
+  acentric: z => 1 - Math.exp(-Math.max(0, z)),
+  twinnedAcentric: z => 1 - (1 + 2 * Math.max(0, z)) * Math.exp(-2 * Math.max(0, z)),
+};
+
+// Largest vertical gap between the empirical step function of a SORTED
+// array and a reference CDF (Kolmogorov–Smirnov distance D).
+function ksDistance(sorted, cdf) {
+  const n = sorted.length;
+  let d = 0;
+  for (let i = 0; i < n; i++) {
+    const F = cdf(sorted[i]);
+    d = Math.max(d, Math.abs((i + 1) / n - F), Math.abs(i / n - F));
+  }
+  return d;
+}
+
+// Builds the N(z) summary from the per-reflection E² values.
+function computeNZ(e2Values, negClipped) {
+  const sorted = e2Values.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  const dCentro = ksDistance(sorted, NZ_REFERENCE.centrosymmetric);
+  const dAcentric = ksDistance(sorted, NZ_REFERENCE.acentric);
+  const dTwin = ksDistance(sorted, NZ_REFERENCE.twinnedAcentric);
+  // empirical curve on a fixed grid z = 0 ... NZ_ZMAX (pointer walk, O(n + grid))
+  const curve = [];
+  let idx = 0;
+  const steps = 200;
+  for (let g = 0; g <= steps; g++) {
+    const z = NZ_ZMAX * g / steps;
+    while (idx < n && sorted[idx] <= z) idx++;
+    curve.push({ z, n: idx / n });
+  }
+  const best = Math.min(dCentro, dAcentric, dTwin);
+  const closest = best === dTwin ? 'acentric, twinned?' : (best === dCentro ? 'centrosymmetric' : 'acentric');
+  return { n, negClipped, dCentro, dAcentric, dTwin, curve, closest };
+}
+const NZ_ZMAX = 4;
+
+// Systematic absences caused by the LATTICE (centering) are not a feature
+// of the structure: those reflections are zero by construction, so mixing
+// them into Wilson/E² statistics distorts every distribution (a C-centred
+// acentric structure with the absent reflections left in came out as
+// "centrosymmetric" in testing). The centering is read from the Hall symbol
+// of the currently selected space-group candidate — only the lattice
+// letter is used, never the (circular) screw/glide conditions.
+function filterByLattice(reflections, hall) {
+  if (!hall) return { reflections, note: 'no space-group candidate yet — all reflections used', removed: 0 };
+  const m = String(hall).trim().replace(/^-/, '').match(/^[A-Za-z]/);
+  const letter = m ? m[0].toUpperCase() : 'P';
+  const mod = (x, n) => ((x % n) + n) % n;
+  let test = null, label = letter;
+  switch (letter) {
+    case 'A': test = r => mod(r.k + r.l, 2) === 0; break;
+    case 'B': test = r => mod(r.h + r.l, 2) === 0; break;
+    case 'C': test = r => mod(r.h + r.k, 2) === 0; break;
+    case 'I': test = r => mod(r.h + r.k + r.l, 2) === 0; break;
+    case 'F': test = r => mod(r.h + r.k, 2) === 0 && mod(r.h + r.l, 2) === 0; break;
+    case 'R': {
+      // obverse (-h+k+l = 3n) or reverse (h-k+l = 3n) setting: pick whichever
+      // one the data actually obey (higher mean intensity of allowed reflections)
+      const obv = r => mod(-r.h + r.k + r.l, 3) === 0;
+      const rev = r => mod(r.h - r.k + r.l, 3) === 0;
+      const meanOf = t => { let s = 0, c = 0; for (const r of reflections) if (t(r)) { s += r.f2; c++; } return c ? s / c : 0; };
+      const mo = meanOf(obv), mr = meanOf(rev);
+      if (mo > 1.5 * mr) { test = obv; label = 'R (obverse)'; }
+      else if (mr > 1.5 * mo) { test = rev; label = 'R (reverse)'; }
+      break;
+    }
+    default: break; // P (and anything unrecognised): nothing to remove
+  }
+  if (!test) return { reflections, note: letter === 'R' ? 'lattice R: obverse/reverse setting unclear — all reflections used' : 'primitive lattice — no centering absences to remove', removed: 0 };
+  const kept = reflections.filter(test);
+  const removed = reflections.length - kept.length;
+  return { reflections: kept, note: `lattice ${label}: ${removed} centering-absent reflection(s) excluded before merging`, removed };
+}
+
 // Sum of f_j(s)^2 over the unit cell contents at one resolution point s.
 // Returns the elements missing from the scattering-factor table (if any)
 // alongside the sum, so the caller can report exactly what's missing
@@ -116,6 +213,8 @@ function computeEStatistics(reflections, cell, composition, groupMatrices) {
   const k = Math.exp(-intercept); // scales observed F² onto an absolute (electron²) scale
 
   let usable = 0, sumE2 = 0, sumAbsE2minus1 = 0, sumAbsE = 0, countEgt3 = 0;
+  const nzValues = []; // E² per reflection for the N(z) test
+  let negClipped = 0;
   for (let i = 0; i < merged.length; i++) {
     const s = sValues[i];
     const { sum: sumF2calc } = sumSquaredScatteringFactors(composition, s);
@@ -123,7 +222,13 @@ function computeEStatistics(reflections, cell, composition, groupMatrices) {
     const expected = sumF2calc * Math.exp(-2 * B * s * s);
     if (expected <= 0) continue;
     const e2 = (k * merged[i].f2) / expected;
-    if (!Number.isFinite(e2) || e2 < 0) continue;
+    if (!Number.isFinite(e2)) continue;
+    // Negative net intensities are real WEAK reflections: for N(z) they count
+    // as z = 0 instead of being dropped (dropping them would remove exactly
+    // the low-z end of the distribution that the test relies on). The other
+    // statistics below keep their original behaviour and skip them.
+    if (e2 < 0) { nzValues.push(0); negClipped++; continue; }
+    nzValues.push(e2);
     usable++;
     sumE2 += e2;
     sumAbsE2minus1 += Math.abs(e2 - 1);
@@ -152,6 +257,7 @@ function computeEStatistics(reflections, cell, composition, groupMatrices) {
   return {
     uniqueReflections: merged.length, usableReflections: usable,
     B, k, wilsonPoints,
+    nz: computeNZ(nzValues, negClipped),
     meanE2, meanE2minus1, meanE, fractionEgt3,
     verdict, distCentro, distAcentric, margin,
   };
@@ -236,14 +342,89 @@ function drawWilsonPlot(canvas, wilsonPoints, B, k, zoom = 1) {
   ctx.fillStyle = colors.text;
   ctx.font = '11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('sin²(θ)/λ² (Å⁻²)', margin.left + plotW / 2, cssH - 6);
+  ctx.fillText('(sin θ/λ)² (Å⁻²)', margin.left + plotW / 2, cssH - 6);
   ctx.save();
   ctx.translate(12, margin.top + plotH / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText('ln(⟨Fo²⟩ / Σf²)', 0, 0);
+  ctx.fillText('ln(⟨Fo²⟩ / Σf²), unscaled', 0, 0);
   ctx.restore();
+}
+
+// --- N(z) plot --------------------------------------------------------------
+// Cumulative distribution of E² against the three ideal curves. Observed
+// curve = solid blue; centrosymmetric = green; acentric = red; perfectly
+// twinned acentric = dashed grey.
+let _lastNZPlotArgs = null;
+
+function renderNZPlot(container, nz) {
+  _lastNZPlotArgs = [container, nz];
+  const canvas = document.createElement('canvas');
+  container.innerHTML = '';
+  container.appendChild(canvas);
+  drawNZPlot(canvas, nz);
+  attachPlotZoom(canvas, '<strong>N(z) test</strong>', 480,
+    (cv, zoom) => drawNZPlot(cv, nz, zoom));
+}
+
+function drawNZPlot(canvas, nz, zoom = 1) {
+  const colors = getPlotColors();
+  const cssW = 480, cssH = 320;
+  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
+  const margin = { left: 50, right: 15, top: 15, bottom: 40 };
+  const plotW = cssW - margin.left - margin.right;
+  const plotH = cssH - margin.top - margin.bottom;
+  const px = z => margin.left + (z / NZ_ZMAX) * plotW;
+  const py = y => margin.top + plotH - y * plotH;
+
+  ctx.strokeStyle = colors.grid; ctx.fillStyle = colors.text; ctx.font = '10px sans-serif'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {            // x: z = 0 ... 4 in steps of 1
+    const x = px(i);
+    ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, margin.top + plotH); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.fillText(String(i), x, cssH - margin.bottom + 14);
+  }
+  for (let i = 0; i <= 5; i++) {            // y: N(z) = 0 ... 1 in steps of 0.2
+    const y = py(i / 5);
+    ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + plotW, y); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.fillText((i / 5).toFixed(1), margin.left - 6, y + 3);
+  }
+
+  const drawCurve = (fn, color, width, dash) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash || []);
+    ctx.beginPath();
+    for (let g = 0; g <= 200; g++) {
+      const z = NZ_ZMAX * g / 200;
+      g === 0 ? ctx.moveTo(px(z), py(fn(z))) : ctx.lineTo(px(z), py(fn(z)));
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  drawCurve(NZ_REFERENCE.centrosymmetric, colors.present, 1.5);
+  drawCurve(NZ_REFERENCE.acentric, colors.fitLine, 1.5);
+  drawCurve(NZ_REFERENCE.twinnedAcentric, colors.axis, 1.5, [4, 3]);
+
+  ctx.strokeStyle = colors.point; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  nz.curve.forEach((p, i) => { i === 0 ? ctx.moveTo(px(p.z), py(p.n)) : ctx.lineTo(px(p.z), py(p.n)); });
+  ctx.stroke();
+
+  // legend, bottom right (the curves all sit in the upper left)
+  const items = [['observed', colors.point, 2.5, null], ['centrosymmetric', colors.present, 1.5, null],
+                 ['acentric', colors.fitLine, 1.5, null], ['acentric, perfect twin', colors.axis, 1.5, [4, 3]]];
+  ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  items.forEach(([label, col, w, dash], i) => {
+    const y = margin.top + plotH - 12 - (items.length - 1 - i) * 14;
+    const x0 = margin.left + plotW - 135;
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash || []);
+    ctx.beginPath(); ctx.moveTo(x0, y - 3); ctx.lineTo(x0 + 22, y - 3); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = colors.text; ctx.fillText(label, x0 + 28, y);
+  });
+
+  ctx.fillStyle = colors.text; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('z = E²', margin.left + plotW / 2, cssH - 6);
+  ctx.save(); ctx.translate(12, margin.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('N(z) = fraction with E² ≤ z', 0, 0); ctx.restore();
 }
 
 onPlotThemeChange(() => {
   if (_lastWilsonPlotArgs) renderWilsonPlot(..._lastWilsonPlotArgs);
+  if (_lastNZPlotArgs) renderNZPlot(..._lastNZPlotArgs);
 });

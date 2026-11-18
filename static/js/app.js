@@ -149,6 +149,34 @@
       document.getElementById('laueVizEmpty').style.display = 'none';
       renderLaueOverview(document.getElementById('laueVizContainer'), document.getElementById('laueVizNote'),
         lastReflections, readCellOrNull(), determinedLaueClass);
+      renderShellStats();
+    }
+
+    // Resolution-shell merging statistics (shell-stats.js) under the Laue
+    // class from merging (or the highest-symmetry candidate if none was
+    // confirmed). Centering-absent reflections of the OBSERVED lattice are
+    // dropped first (they are zero by construction and would drag <I/σ> and
+    // the R values down). Information only: nothing is written to the .ins.
+    function renderShellStats() {
+      const el = document.getElementById('shellStatsContainer');
+      if (!el) return;
+      if (!lastReflections) { el.innerHTML = ''; return; }
+      const cell = readCellOrNull();
+      if (!cell) { el.innerHTML = '<p><small>Needs all six cell constants.</small></p>'; return; }
+      try {
+        const classification = classifyCellMetric(cell);
+        const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
+        const laue = determinedLaueClass || classification.laueClasses[0];
+        const group = generateGroup(getLaueClassGenerators(laue, monoclinicAxis));
+        const centering = scanLatticeCentering(lastReflections);
+        const centName = Object.entries(centering)
+          .find(([name, r]) => name !== 'P (primitive)' && r.verdict === 'holds')?.[0] || 'P (primitive)';
+        const lat = filterByLattice(lastReflections, centName[0]);
+        const stats = computeShellStatistics(lat.reflections, cell, group);
+        renderShellStatistics(el, stats, { laue, assumed: !determinedLaueClass, lattice: lat.note });
+      } catch (err) {
+        el.innerHTML = `<p style="color:#b00"><small>Could not compute shell statistics: ${err.message}</small></p>`;
+      }
     }
 
     function runAbsencesScan() {
@@ -1096,7 +1124,12 @@
         const targetLaueClass = determinedLaueClass || classification.laueClasses[0];
         const group = generateGroup(getLaueClassGenerators(targetLaueClass, monoclinicAxis));
 
-        const stats = computeEStatistics(lastReflections, values, compInfo.composition, group);
+        // Centering absences are zero by construction (lattice, not structure):
+        // exclude them before merging, using the lattice of the selected candidate.
+        const selectedHall = lastMatchResults && lastMatchResults[selectedCandidateIndex]
+          ? lastMatchResults[selectedCandidateIndex].entry.hall : null;
+        const latticeInfo = filterByLattice(lastReflections, selectedHall);
+        const stats = computeEStatistics(latticeInfo.reflections, values, compInfo.composition, group);
 
         if (stats.error) {
           eStatResultEl.innerHTML = `<p style="color:#b00">${stats.error}</p>`;
@@ -1106,6 +1139,15 @@
 
         const ref = WILSON_REFERENCE;
         const verdictColor = stats.verdict === 'centrosymmetric' ? '#080' : '#06c';
+        const nzColor = stats.nz.closest === 'centrosymmetric' ? '#080' : (stats.nz.closest === 'acentric' ? '#06c' : '#b60');
+        // Plain-language reading of the N(z) result next to the <|E²−1|> verdict.
+        let nzNote = '';
+        if (stats.nz.closest === 'acentric, twinned?') {
+          nzNote = `<p style="color:#b60"><small>⚠ The distribution is closest to a <strong>twinned acentric</strong> crystal. A true centrosymmetric structure would be closer to the green curve —
+            if the &lt;|E²−1|&gt; verdict above says "centrosymmetric", consider twinning (e.g. a pseudo-merohedral twin of an acentric structure) before trusting it.</small></p>`;
+        } else if ((stats.nz.closest === 'centrosymmetric') !== (stats.verdict === 'centrosymmetric')) {
+          nzNote = `<p style="color:#b60"><small>⚠ N(z) and &lt;|E²−1|&gt; point in different directions — the data are not clean enough for either to be decisive (twinning, a dominant heavy atom or pseudosymmetry are the usual causes).</small></p>`;
+        }
 
         // If the space-group candidates included a centrosymmetric/acentric
         // tie at the top score, this verdict IS the evidence needed to
@@ -1137,7 +1179,7 @@
         eStatResultEl.innerHTML = `
           <h2>E² statistics (Wilson plot)</h2>
           <p><small>Composition: ${compInfo.source} · merged under Laue class ${targetLaueClass}${determinedLaueClassSource === 'merging' ? '' : ' (assumed, not yet confirmed above)'}
-          · ${stats.uniqueReflections} unique reflections (${stats.usableReflections} usable)</small></p>
+          · ${stats.uniqueReflections} unique reflections (${stats.usableReflections} usable)<br>${latticeInfo.note}</small></p>
           <table>
             <tr><th></th><th>this data</th><th>ref. centrosymmetric</th><th>ref. acentric</th></tr>
             <tr><td>&lt;|E²−1|&gt;</td><td><strong>${stats.meanE2minus1.toFixed(3)}</strong></td><td>${ref.centrosymmetric.meanE2minus1}</td><td>${ref.acentric.meanE2minus1}</td></tr>
@@ -1151,9 +1193,21 @@
           common real causes are a dominant heavy atom (breaks the "randomly distributed atoms" Wilson assumption, especially at low resolution), twinning, or non-ideal data scaling; none of those are
           errors in this calculation, they're properties of the data itself. This is a different question from the absences scan above — Friedel's law makes every diffraction pattern look centrosymmetric
           regardless of the crystal's true symmetry, so this is the one of the two that can actually distinguish an acentric structure from a centrosymmetric one.</small></p>
-          <div id="wilsonPlotContainer"></div>`;
+          <div id="wilsonPlotContainer"></div>
+          <h2>N(z) test (cumulative E² distribution)</h2>
+          <p><small>Shows the fraction of reflections with E² ≤ z against the ideal curves. Unlike the single number &lt;|E²−1|&gt; it uses the whole distribution,
+          so it also reveals <strong>twinning</strong> (a twinned acentric crystal sits between the two ideal curves, with too few weak reflections for a centric structure).
+          Closeness is the Kolmogorov distance D = largest vertical gap to each curve (smaller = better). With real data D rarely drops below ~0.02–0.05.</small></p>
+          <table>
+            <tr><th></th><th>centrosymmetric</th><th>acentric</th><th>acentric, perfect twin</th></tr>
+            <tr><td>D</td><td>${stats.nz.dCentro.toFixed(3)}</td><td>${stats.nz.dAcentric.toFixed(3)}</td><td>${stats.nz.dTwin.toFixed(3)}</td></tr>
+          </table>
+          <p style="color:${nzColor}"><strong>N(z) is closest to: ${stats.nz.closest}</strong> <small>(${stats.nz.n} reflections${stats.nz.negClipped ? `, ${stats.nz.negClipped} with negative intensity counted as z = 0` : ''})</small></p>
+          ${nzNote}
+          <div id="nzPlotContainer"></div>`;
 
         renderWilsonPlot(document.getElementById('wilsonPlotContainer'), stats.wilsonPoints, stats.B, stats.k);
+        renderNZPlot(document.getElementById('nzPlotContainer'), stats.nz);
         resolve(true);
         }, 10);
       });

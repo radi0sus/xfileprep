@@ -27,7 +27,7 @@
     <div id="dropZone">
       Drop file(s) here — anywhere in the window — (.hkl, .cif, .ins, .p4p)<br>
       <small>or</small><br>
-      <input type="file" id="hklInput" multiple accept=".hkl,.raw,.txt,.cif,.ins,.res,.p4p">
+      <input type="file" id="hklInput" multiple>
     </div>
     <p><small>Tip: for a reflection file plus a separate cell-info file (e.g. .hkl + .ins, or .hkl + .p4p), drop them in either order —
     whichever one carries the cell (.ins/.p4p/CIF) fills in the cell constants (and composition/wavelength where available), and
@@ -85,6 +85,10 @@
         </select></label></p>
       <div id="laueVizNote"></div>
       <div id="laueVizContainer" class="laueGrid"></div>
+
+      <h2>Resolution shells (merging statistics)</h2>
+      <p><small>Where do the data stop being useful? Information only — no cut-off is applied to the .ins or the .hkl.</small></p>
+      <div id="shellStatsContainer"></div>
     </div>
     <p id="laueVizEmpty"><small>Load reflection data and a cell to see the Laue overview.</small></p>
   </div>
@@ -150,6 +154,7 @@
   <script src="static/js/scattering-factors.js"></script>
   <script src="static/js/d-spacing.js"></script>
   <script src="static/js/e-statistics.js"></script>
+  <script src="static/js/shell-stats.js"></script>
   <script src="static/js/app.js"></script>
 </div>
 </body>

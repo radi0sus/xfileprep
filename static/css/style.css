@@ -317,3 +317,14 @@ canvas {
 .fileChip.missing { opacity: 0.6; }
 .fileChip.hint { background: rgba(200,150,0,0.14); border-color: rgba(200,150,0,0.55); }
 .fileChip.hint button { margin-left: 4px; }
+
+/* resolution-shell table (shell-stats.js): marker row where <I/σ> first drops below 2 */
+tr.shellCut td { background: rgba(255, 170, 0, 0.18); }
+tr.shellTotal td { font-weight: 600; border-top: 2px solid var(--border, #bbb); }
+
+/* keep σ and R_meas readable: the global th rule would turn σ into Σ */
+table.shellTable th { text-transform: none; font-size: 0.82rem; letter-spacing: 0; }
+details.shellLegend { margin: 0.4rem 0 1rem; font-size: 0.88rem; }
+details.shellLegend summary { cursor: pointer; color: var(--text-muted); }
+details.shellLegend ul { margin: 0.5rem 0 0.3rem 1.1rem; padding: 0; }
+details.shellLegend li { margin: 0.25rem 0; }
