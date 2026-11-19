@@ -14,7 +14,7 @@
 // <I/σ> is the mean of I/σ over the MERGED reflections, with σ the standard
 // error sqrt(Σσᵢ²)/n — the same σ that mergeReflections() reports.
 
-function accumulateShell(chunk) {
+function accumulateShell(chunk, sLo, sHi, possible) {
   let nTotal = 0, sumISig = 0, nISig = 0, nGt2 = 0;
   let numInt = 0, numMeas = 0, numPim = 0, den = 0;
   for (const { members } of chunk) {
@@ -37,10 +37,12 @@ function accumulateShell(chunk) {
       den += sum;
     }
   }
-  const sMin = chunk[0].s, sMax = chunk[chunk.length - 1].s;
+  const nUnique = chunk.length;
   return {
-    dMax: 1 / (2 * sMin), dMin: 1 / (2 * sMax),
-    nUnique: chunk.length, nTotal, redundancy: nTotal / chunk.length,
+    dMax: sLo > 0 ? 1 / (2 * sLo) : null, dMin: 1 / (2 * sHi),
+    nUnique, nTotal, redundancy: nUnique ? nTotal / nUnique : null,
+    possible: possible === null ? null : possible,
+    completeness: possible ? Math.min(1, nUnique / possible) : null,
     meanISigma: nISig ? sumISig / nISig : null,
     fractionGt2: nISig ? nGt2 / nISig : null,
     rInt: den > 0 ? numInt / den : null,
@@ -49,9 +51,58 @@ function accumulateShell(chunk) {
   };
 }
 
-// `reflections` raw (possibly redundant); `groupMatrices` from generateGroup().
-// Shells hold (roughly) equal numbers of unique reflections.
-function computeShellStatistics(reflections, cell, groupMatrices, targetShells = 10) {
+// All symmetry-unique hkl up to sMax that the lattice allows — the denominator
+// of the completeness. A canonical hkl is its own representative, so counting
+// the hkl that map onto themselves under the Laue group counts each unique
+// reflection exactly once, without storing anything. Returns the sorted
+// s = sinθ/λ values, or null if the cell/resolution is so large that the loop
+// would take noticeably long.
+function theoreticalUniqueS(cell, recip, sMax, groupMatrices, latticeTest, maxLoop = 2e7) {
+  const hMax = Math.floor(2 * sMax * cell.a), kMax = Math.floor(2 * sMax * cell.b), lMax = Math.floor(2 * sMax * cell.c);
+  if ((2 * hMax + 1) * (2 * kMax + 1) * (2 * lMax + 1) > maxLoop) return null;
+  const out = [];
+  const lim = sMax + 1e-9;
+  for (let h = -hMax; h <= hMax; h++) {
+    for (let k = -kMax; k <= kMax; k++) {
+      for (let l = -lMax; l <= lMax; l++) {
+        if (h === 0 && k === 0 && l === 0) continue;
+        const s = sinThetaOverLambda(h, k, l, recip);
+        if (s > lim) continue;
+        if (latticeTest && !latticeTest({ h, k, l })) continue;
+        const c = canonicalHKL(h, k, l, groupMatrices);
+        if (c[0] === h && c[1] === k && c[2] === l) out.push(s);
+      }
+    }
+  }
+  return out.sort((a, b) => a - b);
+}
+
+// Shell boundaries shared by the merging table and the E² shell table, so
+// that row n means the same resolution range in both. `sSorted` = s = sinθ/λ
+// of the measured unique reflections, ascending. Shells have equal width in
+// d*³, i.e. the same number of POSSIBLE unique reflections each. Without the
+// theoretical list (huge cell) the boundaries fall back to equal numbers of
+// MEASURED reflections.
+// Returns { bounds (upper s of each shell), theory (sorted s list or null),
+//           haveTheory, sMin, sMax }.
+function computeShellBounds(sSorted, cell, groupMatrices, latticeTest = null, targetShells = 10) {
+  const sMin = sSorted[0], sMax = sSorted[sSorted.length - 1];
+  const recip = reciprocalCellFromDirect(cell);
+  const theory = theoreticalUniqueS(cell, recip, sMax, groupMatrices, latticeTest);
+  const haveTheory = !!theory && theory.length >= 40;
+  const basis = haveTheory ? theory : sSorted;
+  const nShells = Math.max(1, Math.min(targetShells, Math.floor(basis.length / 20)));
+  const per = Math.ceil(basis.length / nShells);
+  const bounds = [];
+  for (let i = 0; i < nShells; i++) bounds.push(basis[Math.min((i + 1) * per, basis.length) - 1]);
+  bounds[nShells - 1] = Math.max(bounds[nShells - 1], sMax);
+  return { bounds, theory: haveTheory ? theory : null, haveTheory, sMin, sMax };
+}
+
+// `reflections` raw (possibly redundant); `groupMatrices` from generateGroup();
+// `latticeTest` (optional, from filterByLattice) = which hkl the lattice
+// centering allows. The Completeness column shows where the data have gaps.
+function computeShellStatistics(reflections, cell, groupMatrices, targetShells = 10, latticeTest = null) {
   const groups = groupReflectionsByCanonicalHKL(reflections, groupMatrices);
   const recip = reciprocalCellFromDirect(cell);
   const uniques = [];
@@ -63,35 +114,55 @@ function computeShellStatistics(reflections, cell, groupMatrices, targetShells =
     return { error: `Only ${uniques.length} unique reflections — too few for resolution shells.` };
   }
   uniques.sort((a, b) => a.s - b.s);
-  const nShells = Math.max(1, Math.min(targetShells, Math.floor(uniques.length / 20)));
-  const per = Math.ceil(uniques.length / nShells);
-  const shells = [];
-  for (let i = 0; i < uniques.length; i += per) shells.push(accumulateShell(uniques.slice(i, i + per)));
-  const overall = accumulateShell(uniques);
-  // first shell (from low to high resolution) where <I/σ> falls below 2: a
-  // common rule of thumb puts the resolution limit at or just before it
+  const info = computeShellBounds(uniques.map(u => u.s), cell, groupMatrices, latticeTest, targetShells);
+  const { bounds, theory, haveTheory, sMax } = info;
+
+  const chunks = bounds.map(() => []);
+  let idx = 0;
+  for (const u of uniques) {
+    while (idx < bounds.length - 1 && u.s > bounds[idx]) idx++;
+    chunks[idx].push(u);
+  }
+  const possibleIn = (lo, hi) => {
+    if (!haveTheory) return null;
+    let c = 0;
+    for (const s of theory) { if (s > hi) break; if (s > lo) c++; }
+    return c;
+  };
+  const shells = chunks.map((chunk, i) => {
+    const lo = i === 0 ? 0 : bounds[i - 1];
+    const sLo = i === 0 ? uniques[0].s : lo;
+    return accumulateShell(chunk, sLo, bounds[i], possibleIn(i === 0 ? -1 : lo, bounds[i]));
+  });
+  const overall = accumulateShell(uniques, uniques[0].s, sMax, haveTheory ? theory.length : null);
   const cutoffIndex = shells.findIndex(sh => sh.meanISigma !== null && sh.meanISigma < 2);
-  return { shells, overall, cutoffIndex };
+  return { shells, overall, cutoffIndex, haveTheory };
 }
 
 function renderShellStatistics(container, stats, info) {
   if (stats.error) { container.innerHTML = `<p><small>${stats.error}</small></p>`; return; }
   const pct = x => (x === null ? '—' : (x * 100).toFixed(1) + ' %');
   const num = (x, d = 1) => (x === null ? '—' : x.toFixed(d));
+  const compCell = sh => {
+    if (sh.completeness === null) return '<td>—</td>';
+    const low = sh.completeness < 0.95;
+    return `<td${low ? ' style="color:#b60;font-weight:600;"' : ''} title="${sh.nUnique} of ${sh.possible} possible unique reflections">${(sh.completeness * 100).toFixed(1)} %</td>`;
+  };
   const row = (label, sh, cls) => `
     <tr${cls ? ` class="${cls}"` : ''}>
-      <td>${label}</td><td>${sh.nUnique}</td><td>${sh.redundancy.toFixed(2)}</td>
+      <td>${label}</td><td>${sh.nUnique}</td>${compCell(sh)}<td>${sh.redundancy === null ? '—' : sh.redundancy.toFixed(2)}</td>
       <td>${num(sh.meanISigma)}</td><td>${pct(sh.fractionGt2)}</td>
       <td>${pct(sh.rInt)}</td><td>${pct(sh.rMeas)}</td><td>${pct(sh.rPim)}</td>
     </tr>`;
+  const dLabel = sh => `${sh.dMax === null ? '∞' : sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å`;
   const rows = stats.shells.map((sh, i) =>
-    row(`${sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å`, sh, i === stats.cutoffIndex ? 'shellCut' : '')).join('');
-  const total = row(`all (${stats.overall.dMax.toFixed(2)} – ${stats.overall.dMin.toFixed(2)} Å)`, stats.overall, 'shellTotal');
+    row(dLabel(sh), sh, i === stats.cutoffIndex ? 'shellCut' : '')).join('');
+  const total = row(`all (${dLabel(stats.overall)})`, stats.overall, 'shellTotal');
 
   let cutNote;
   if (stats.cutoffIndex >= 0) {
     const sh = stats.shells[stats.cutoffIndex];
-    cutNote = `<p><small>⟨I/σ⟩ drops below 2 in the highlighted shell (${sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å). A common rule of thumb puts the resolution limit at or just before such a shell.
+    cutNote = `<p><small>⟨I/σ⟩ drops below 2 in the highlighted shell (${dLabel(sh)}). A common rule of thumb puts the resolution limit at or just before such a shell.
       This is shown for orientation only — nothing is cut or written to the .ins/.hkl.</small></p>`;
   } else {
     cutNote = `<p><small>⟨I/σ⟩ stays above 2 in every shell — no obvious resolution cut-off in this data set. Nothing is cut or written to the .ins/.hkl.</small></p>`;
@@ -101,10 +172,10 @@ function renderShellStatistics(container, stats, info) {
 
   container.innerHTML = `
     <p><small>Merged under Laue class ${info.laue}${info.assumed ? ' (assumed, not confirmed by merging)' : ''}; ${info.lattice}.
-      Shells hold about the same number of unique reflections each, from low to high resolution.
+      Shells have equal width in d*³ (the same number of possible unique reflections each), from low to high resolution.
       Where the mean intensity approaches zero the R values grow without limit — use ⟨I/σ⟩ there.</small></p>
     <table class="shellTable">
-      <tr><th>d range</th><th>Unique</th><th>Redundancy</th><th>⟨I/σ⟩</th><th>I &gt; 2σ</th>
+      <tr><th>d range</th><th>Unique</th><th>Complete</th><th>Redundancy</th><th>⟨I/σ⟩</th><th>I &gt; 2σ</th>
           <th>R<sub>int</sub></th><th>R<sub>meas</sub></th><th>R<sub>pim</sub></th></tr>
       ${rows}${total}
     </table>
@@ -113,7 +184,8 @@ function renderShellStatistics(container, stats, info) {
       <summary>What do these columns mean?</summary>
       <ul>
         <li><strong>d range</strong> — resolution shell in Å (low to high resolution).</li>
-        <li><strong>Unique</strong> / <strong>Redundancy</strong> — symmetry-unique reflections in the shell, and how often each was measured on average.</li>
+        <li><strong>Unique</strong> / <strong>Redundancy</strong> — symmetry-unique reflections measured in the shell, and how often each was measured on average.</li>
+        <li><strong>Complete</strong> — measured unique reflections divided by the unique reflections the cell, lattice centering and Laue class allow in that shell (hover for the counts). Below 95 % is shown in orange: gaps in the data (beamstop, detector gaps, short scan). The bottom row is the completeness up to the highest measured resolution. It counts lattice-allowed reflections only — if the file was already cleaned of screw/glide absences, the value is too low.</li>
         <li><strong>⟨I/σ⟩</strong> — mean signal-to-noise of the merged reflections (intensity divided by its standard uncertainty σ). Higher is better; a common rule of thumb puts the resolution limit where it falls below about 2.</li>
         <li><strong>I &gt; 2σ</strong> — share of merged reflections whose intensity is more than twice its uncertainty ("observed" reflections).</li>
         <li><strong>R<sub>int</sub></strong> — spread of equivalent measurements around their mean, Σ|I − ⟨I⟩| / ΣI. It grows with redundancy even when the data get better.</li>

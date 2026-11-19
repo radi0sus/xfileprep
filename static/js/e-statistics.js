@@ -109,7 +109,7 @@ const NZ_ZMAX = 4;
 // of the currently selected space-group candidate — only the lattice
 // letter is used, never the (circular) screw/glide conditions.
 function filterByLattice(reflections, hall) {
-  if (!hall) return { reflections, note: 'no space-group candidate yet — all reflections used', removed: 0 };
+  if (!hall) return { reflections, note: 'no space-group candidate yet — all reflections used', removed: 0, test: null };
   const m = String(hall).trim().replace(/^-/, '').match(/^[A-Za-z]/);
   const letter = m ? m[0].toUpperCase() : 'P';
   const mod = (x, n) => ((x % n) + n) % n;
@@ -133,10 +133,10 @@ function filterByLattice(reflections, hall) {
     }
     default: break; // P (and anything unrecognised): nothing to remove
   }
-  if (!test) return { reflections, note: letter === 'R' ? 'lattice R: obverse/reverse setting unclear — all reflections used' : 'primitive lattice — no centering absences to remove', removed: 0 };
+  if (!test) return { reflections, note: letter === 'R' ? 'lattice R: obverse/reverse setting unclear — all reflections used' : 'primitive lattice — no centering absences to remove', removed: 0, test: null };
   const kept = reflections.filter(test);
   const removed = reflections.length - kept.length;
-  return { reflections: kept, note: `lattice ${label}: ${removed} centering-absent reflection(s) excluded before merging`, removed };
+  return { reflections: kept, note: `lattice ${label}: ${removed} centering-absent reflection(s) excluded before merging`, removed, test };
 }
 
 // Sum of f_j(s)^2 over the unit cell contents at one resolution point s.
@@ -177,7 +177,136 @@ function binByResolution(reflections, sValues, targetShells = 20) {
 // `reflections` are RAW (possibly redundant) observations; `cell` is the
 // direct unit cell; `composition` is [{element, count}] for the WHOLE
 // unit cell (see ins-parser.js / the formula-times-Z path in index.html).
-function computeEStatistics(reflections, cell, composition, groupMatrices) {
+// --- E² statistics per resolution shell --------------------------------------
+// The overall <|E²−1|> mixes all resolutions. A dominant heavy atom (strong at
+// low resolution only) or pseudosymmetry bends the distribution in part of
+// the range, so the same number is also worked out shell by shell. Within each
+// shell E² is rescaled to <E²> = 1 — otherwise the global Wilson fit (one
+// straight line through all shells) would leak into the comparison. The raw
+// <E²> of the global fit is kept to show where that fit misses.
+const E_SHELL_MIN = 100;   // reflections per shell below which the scatter gets too large
+const E_SHELL_MAX = 8;     // only used by the fallback (no theoretical shell list)
+
+// `shellInfo` = result of computeShellBounds(): the same shell boundaries as
+// the merging table (row n = same resolution range). Shells with fewer than
+// E_SHELL_MIN usable reflections are still listed but marked `few` and left
+// out of the agreement check. Without shellInfo the shells hold equal numbers
+// of measured reflections instead.
+function computeEShells(pairs, shellInfo = null) {
+  const n = pairs.length;
+  const sorted = pairs.slice().sort((a, b) => a.s - b.s);
+  let chunks, sLo = [];
+  if (shellInfo && shellInfo.haveTheory) {
+    const { bounds, sMin } = shellInfo;
+    chunks = bounds.map(() => []);
+    let idx = 0;
+    for (const p of sorted) {
+      while (idx < bounds.length - 1 && p.s > bounds[idx]) idx++;
+      chunks[idx].push(p);
+    }
+    sLo = bounds.map((b, i) => (i === 0 ? sMin : bounds[i - 1]));
+  } else {
+    const nShells = Math.min(E_SHELL_MAX, Math.floor(n / E_SHELL_MIN));
+    if (nShells < 2) return { tooFew: true, n };
+    const per = Math.ceil(n / nShells);
+    chunks = [];
+    for (let i = 0; i < n; i += per) chunks.push(sorted.slice(i, i + per));
+  }
+  const mid = (WILSON_REFERENCE.centrosymmetric.meanE2minus1 + WILSON_REFERENCE.acentric.meanE2minus1) / 2;
+  const shells = [];
+  chunks.forEach((chunk, i) => {
+    const m = chunk.length;
+    if (m === 0) return;
+    const meanE2raw = chunk.reduce((a, p) => a + p.e2, 0) / m;
+    if (!(meanE2raw > 0)) return;
+    let sumAbs = 0, gt3 = 0, sumS2 = 0;
+    for (const p of chunk) {
+      const e2 = p.e2 / meanE2raw;
+      sumAbs += Math.abs(e2 - 1);
+      if (Math.sqrt(e2) > 3) gt3++;
+      sumS2 += p.s * p.s;
+    }
+    const meanAbs = sumAbs / m;
+    const lo = sLo.length ? sLo[i] : chunk[0].s;
+    const hi = shellInfo && shellInfo.haveTheory ? shellInfo.bounds[i] : chunk[m - 1].s;
+    shells.push({
+      n: m, meanE2raw, meanAbs, fractionEgt3: gt3 / m,
+      s2: sumS2 / m,
+      dMax: lo > 0 ? 1 / (2 * lo) : null, dMin: 1 / (2 * hi),
+      few: m < E_SHELL_MIN,
+      verdict: meanAbs < mid ? 'acentric' : 'centrosymmetric',
+    });
+  });
+  const used = shells.filter(sh => !sh.few);
+  if (used.length < 2) return { tooFew: true, n };
+  const verdicts = new Set(used.map(sh => sh.verdict));
+  return { shells, consistent: verdicts.size === 1, nFew: shells.length - used.length, n };
+}
+
+// Plot: shell-wise <|E²−1|> against (sin θ/λ)², with the two reference values.
+let _lastEShellPlotArgs = null;
+
+function renderEShellPlot(container, eShells) {
+  _lastEShellPlotArgs = [container, eShells];
+  const canvas = document.createElement('canvas');
+  container.innerHTML = '';
+  container.appendChild(canvas);
+  drawEShellPlot(canvas, eShells);
+  attachPlotZoom(canvas, '<strong>E² statistics by resolution shell</strong>', 480,
+    (cv, zoom) => drawEShellPlot(cv, eShells, zoom));
+}
+
+function drawEShellPlot(canvas, eShells, zoom = 1) {
+  const colors = getPlotColors();
+  const cssW = 480, cssH = 300;
+  const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
+  const margin = { left: 50, right: 15, top: 15, bottom: 40 };
+  const plotW = cssW - margin.left - margin.right;
+  const plotH = cssH - margin.top - margin.bottom;
+  const sh = eShells.shells;
+  const xMax = Math.max(...sh.map(p => p.s2)) * 1.08;
+  const yMin = 0.5, yMax = 1.2;
+  const px = x => margin.left + (x / xMax) * plotW;
+  const py = y => margin.top + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
+
+  ctx.strokeStyle = colors.grid; ctx.fillStyle = colors.text; ctx.font = '10px sans-serif'; ctx.lineWidth = 1;
+  for (let y = 0.5; y <= 1.2001; y += 0.1) {
+    ctx.beginPath(); ctx.moveTo(margin.left, py(y)); ctx.lineTo(margin.left + plotW, py(y)); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.fillText(y.toFixed(1), margin.left - 6, py(y) + 3);
+  }
+  const xStep = xMax > 0.3 ? 0.1 : 0.05;
+  for (let x = 0; x <= xMax; x += xStep) {
+    ctx.beginPath(); ctx.moveTo(px(x), margin.top); ctx.lineTo(px(x), margin.top + plotH); ctx.stroke();
+    ctx.textAlign = 'center'; ctx.fillText(x.toFixed(2), px(x), cssH - margin.bottom + 14);
+  }
+
+  const refLine = (y, color, label) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
+    ctx.beginPath(); ctx.moveTo(margin.left, py(y)); ctx.lineTo(margin.left + plotW, py(y)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = color; ctx.textAlign = 'right';
+    ctx.fillText(label, margin.left + plotW - 4, py(y) - 4);
+  };
+  refLine(WILSON_REFERENCE.centrosymmetric.meanE2minus1, colors.present, 'centrosymmetric 0.968');
+  refLine(WILSON_REFERENCE.acentric.meanE2minus1, colors.fitLine, 'acentric 0.736');
+
+  const y = v => Math.max(yMin, Math.min(yMax, v)); // keep outliers on the plot
+  ctx.strokeStyle = colors.point; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  sh.filter(p => !p.few).forEach((p, i) => { i === 0 ? ctx.moveTo(px(p.s2), py(y(p.meanAbs))) : ctx.lineTo(px(p.s2), py(y(p.meanAbs))); });
+  ctx.stroke();
+  ctx.fillStyle = colors.point;
+  sh.forEach(p => {   // hollow circle = fewer than E_SHELL_MIN reflections (not used for the comparison)
+    ctx.beginPath(); ctx.arc(px(p.s2), py(y(p.meanAbs)), 4, 0, 2 * Math.PI);
+    if (p.few) ctx.stroke(); else ctx.fill();
+  });
+
+  ctx.fillStyle = colors.text; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('(sin θ/λ)² (Å⁻²), shell mean', margin.left + plotW / 2, cssH - 6);
+  ctx.save(); ctx.translate(12, margin.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('⟨|E²−1|⟩ per shell', 0, 0); ctx.restore();
+}
+
+function computeEStatistics(reflections, cell, composition, groupMatrices, latticeTest = null) {
   const merged = mergeReflections(reflections, groupMatrices);
   if (merged.length < 60) {
     return { error: `Only ${merged.length} symmetry-unique reflections — too few for a meaningful Wilson plot (need at least ~60).` };
@@ -214,6 +343,7 @@ function computeEStatistics(reflections, cell, composition, groupMatrices) {
 
   let usable = 0, sumE2 = 0, sumAbsE2minus1 = 0, sumAbsE = 0, countEgt3 = 0;
   const nzValues = []; // E² per reflection for the N(z) test
+  const eBySin = [];   // (s, E²) of the usable reflections, for the per-shell statistics
   let negClipped = 0;
   for (let i = 0; i < merged.length; i++) {
     const s = sValues[i];
@@ -229,6 +359,7 @@ function computeEStatistics(reflections, cell, composition, groupMatrices) {
     // statistics below keep their original behaviour and skip them.
     if (e2 < 0) { nzValues.push(0); negClipped++; continue; }
     nzValues.push(e2);
+    eBySin.push({ s, e2 });
     usable++;
     sumE2 += e2;
     sumAbsE2minus1 += Math.abs(e2 - 1);
@@ -258,6 +389,8 @@ function computeEStatistics(reflections, cell, composition, groupMatrices) {
     uniqueReflections: merged.length, usableReflections: usable,
     B, k, wilsonPoints,
     nz: computeNZ(nzValues, negClipped),
+    eShells: computeEShells(eBySin, typeof computeShellBounds === 'function'
+      ? computeShellBounds(sValues.filter(v => v > 0).sort((a, b) => a - b), cell, groupMatrices, latticeTest) : null),
     meanE2, meanE2minus1, meanE, fractionEgt3,
     verdict, distCentro, distAcentric, margin,
   };
@@ -427,4 +560,5 @@ function drawNZPlot(canvas, nz, zoom = 1) {
 onPlotThemeChange(() => {
   if (_lastWilsonPlotArgs) renderWilsonPlot(..._lastWilsonPlotArgs);
   if (_lastNZPlotArgs) renderNZPlot(..._lastNZPlotArgs);
+  if (_lastEShellPlotArgs) renderEShellPlot(..._lastEShellPlotArgs);
 });

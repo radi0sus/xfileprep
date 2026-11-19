@@ -177,7 +177,7 @@
         const laue = determinedLaueClass || classification.laueClasses[0];
         const group = generateGroup(getLaueClassGenerators(laue, monoclinicAxis));
         const lat = observedLatticeFilter();
-        const stats = computeShellStatistics(lat.reflections, cell, group);
+        const stats = computeShellStatistics(lat.reflections, cell, group, 10, lat.test);
         renderShellStatistics(el, stats, { laue, assumed: !determinedLaueClass, lattice: lat.note });
       } catch (err) {
         el.innerHTML = `<p style="color:#b00"><small>Could not compute shell statistics: ${err.message}</small></p>`;
@@ -1122,7 +1122,7 @@
         // Centering absences are zero by construction (lattice, not structure):
         // exclude them (observed lattice) before merging.
         const latticeInfo = observedLatticeFilter();
-        const stats = computeEStatistics(latticeInfo.reflections, values, compInfo.composition, group);
+        const stats = computeEStatistics(latticeInfo.reflections, values, compInfo.composition, group, latticeInfo.test);
 
         if (stats.error) {
           eStatResultEl.innerHTML = `<p style="color:#b00">${stats.error}</p>`;
@@ -1169,6 +1169,38 @@
           }
         }
 
+        // --- per-shell E² statistics (table + plot container + reading) ---
+        let eShellHtml = '';
+        const es = stats.eShells;
+        if (es && !es.tooFew && es.shells.length >= 2) {
+          const col = v => (v === 'centrosymmetric' ? '#080' : '#06c');
+          const rows = es.shells.map(sh => `
+            <tr${sh.few ? ' style="opacity:0.6;"' : ''}><td>${sh.dMax === null ? '∞' : sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å</td><td>${sh.n}</td><td>${sh.meanE2raw.toFixed(2)}</td>
+            <td><strong>${sh.meanAbs.toFixed(3)}</strong></td>
+            <td style="color:${sh.few ? 'inherit' : col(sh.verdict)}">${sh.few ? 'few reflections' : sh.verdict}</td>
+            <td>${(sh.fractionEgt3 * 100).toFixed(2)}%</td></tr>`).join('');
+          const usedShells = es.shells.filter(sh => !sh.few);
+          const first = usedShells[0], last = usedShells[usedShells.length - 1];
+          const fewNote = es.nFew ? ` ${es.nFew} shell(s) with fewer than ${E_SHELL_MIN} reflections are shown (hollow circles) but not used for this comparison.` : '';
+          const shellNote = es.consistent
+            ? `<p style="color:#080"><small>✓ All ${usedShells.length} resolution shells used point to the same class (${first.verdict}) — the verdict does not depend on the resolution range.${fewNote}</small></p>`
+            : `<p style="color:#b60"><small>⚠ The shells do not agree: ${first.verdict} at low resolution (${first.dMax === null ? '∞' : first.dMax.toFixed(2)} – ${first.dMin.toFixed(2)} Å), ${last.verdict} at high resolution
+               (${last.dMax.toFixed(2)} – ${last.dMin.toFixed(2)} Å). A heavy atom that dominates the low-resolution data, or pseudosymmetry, can do that — treat the overall verdict with caution.
+               If only the outermost shell differs, weak, noisy data are the more likely reason.${fewNote}</small></p>`;
+          eShellHtml = `
+          <h2>E² statistics by resolution shell</h2>
+          <details class="explain"><summary>How to read this</summary><p><small>The same ⟨|E²−1|⟩ as above, worked out separately for resolution shells
+            (same shell boundaries as the merging table on the Laue tab, so row n covers the same resolution range in both; shells with fewer than ${E_SHELL_MIN} reflections are not used for the comparison). Within a shell, E² is rescaled to ⟨E²⟩ = 1 so that the single overall Wilson fit does not leak into the comparison;
+            "⟨E²⟩ (global fit)" shows what the overall fit predicted before that rescaling — values far from 1 mark shells the straight-line Wilson fit misses.
+            Closest = the reference (0.736 acentric / 0.968 centrosymmetric) that the shell value is nearer to.</small></p></details>
+          <table>
+            <tr><th>d range</th><th>Reflections</th><th>⟨E²⟩ (global fit)</th><th>⟨|E²−1|⟩</th><th>Closest</th><th>|E| &gt; 3</th></tr>
+            ${rows}
+          </table>
+          ${shellNote}
+          <div id="eShellPlotContainer"></div>`;
+        }
+
         eStatResultEl.innerHTML = `
           <h2>E² statistics (Wilson plot)</h2>
           <p><small>Composition: ${compInfo.source} · merged under Laue class ${targetLaueClass}${determinedLaueClassSource === 'merging' ? '' : ' (assumed, not yet confirmed above)'}
@@ -1198,10 +1230,12 @@
           </table>
           <p style="color:${nzColor}"><strong>N(z) is closest to: ${stats.nz.closest}</strong> <small>(${stats.nz.n} reflections${stats.nz.negClipped ? `, ${stats.nz.negClipped} with negative intensity counted as z = 0` : ''})</small></p>
           ${nzNote}
-          <div id="nzPlotContainer"></div>`;
+          <div id="nzPlotContainer"></div>
+          ${eShellHtml}`;
 
         renderWilsonPlot(document.getElementById('wilsonPlotContainer'), stats.wilsonPoints, stats.B, stats.k);
         renderNZPlot(document.getElementById('nzPlotContainer'), stats.nz);
+        if (eShellHtml) renderEShellPlot(document.getElementById('eShellPlotContainer'), es);
         resolve(true);
         }, 10);
       });
