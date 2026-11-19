@@ -89,11 +89,19 @@ function extractCellFromCIF(cifText) {
   const z = parseCIFNumber(extractCIFTagValue(cifText, '_cell_formula_units_Z'));
   const wavelength = parseCIFNumber(extractCIFTagValue(cifText, '_diffrn_radiation_wavelength'));
 
-  // reported space group is only for cross-checking later against our own
-  // determination — two common tag names are in use depending on CIF version
+  // Keep CIF space-group metadata as an independent Laue-class source.
+  // CIF versions use several common tag aliases for H-M and Hall symbols.
   const reportedSpaceGroup =
     extractCIFTagValue(cifText, '_symmetry_space_group_name_H-M') ||
-    extractCIFTagValue(cifText, '_space_group_name_H-M_alt');
+    extractCIFTagValue(cifText, '_space_group_name_H-M_alt') ||
+    extractCIFTagValue(cifText, '_space_group_name_H-M_ref');
+  const reportedHallSymbol =
+    extractCIFTagValue(cifText, '_symmetry_space_group_name_Hall') ||
+    extractCIFTagValue(cifText, '_space_group_name_Hall');
+  const reportedSpaceGroupNumber = parseCIFNumber(
+    extractCIFTagValue(cifText, '_space_group_IT_number') ||
+    extractCIFTagValue(cifText, '_symmetry_Int_Tables_number')
+  );
 
   const esdValues = [aInfo.esd, bInfo.esd, cInfo.esd, alphaInfo.esd, betaInfo.esd, gammaInfo.esd];
   const esd = esdValues.some(v => v !== null)
@@ -106,6 +114,8 @@ function extractCellFromCIF(cifText) {
     z: Number.isFinite(z) ? z : null,
     wavelength: Number.isFinite(wavelength) ? wavelength : null,
     reportedSpaceGroup: reportedSpaceGroup || null,
+    reportedHallSymbol: reportedHallSymbol || null,
+    reportedSpaceGroupNumber: Number.isFinite(reportedSpaceGroupNumber) ? reportedSpaceGroupNumber : null,
     esd,
   };
 }

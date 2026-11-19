@@ -14,7 +14,7 @@
 // <I/σ> is the mean of I/σ over the MERGED reflections, with σ the standard
 // error sqrt(Σσᵢ²)/n — the same σ that mergeReflections() reports.
 
-function accumulateShell(chunk, sLo, sHi, possible) {
+function accumulateShell(chunk, sLo, sHi, possible, nAllowed = null) {
   let nTotal = 0, sumISig = 0, nISig = 0, nGt2 = 0;
   let numInt = 0, numMeas = 0, numPim = 0, den = 0;
   for (const { members } of chunk) {
@@ -42,7 +42,7 @@ function accumulateShell(chunk, sLo, sHi, possible) {
     dMax: sLo > 0 ? 1 / (2 * sLo) : null, dMin: 1 / (2 * sHi),
     nUnique, nTotal, redundancy: nUnique ? nTotal / nUnique : null,
     possible: possible === null ? null : possible,
-    completeness: possible ? Math.min(1, nUnique / possible) : null,
+    completeness: possible ? Math.min(1, (nAllowed === null ? nUnique : nAllowed) / possible) : null,
     meanISigma: nISig ? sumISig / nISig : null,
     fractionGt2: nISig ? nGt2 / nISig : null,
     rInt: den > 0 ? numInt / den : null,
@@ -108,7 +108,7 @@ function computeShellStatistics(reflections, cell, groupMatrices, targetShells =
   const uniques = [];
   for (const g of groups.values()) {
     const s = sinThetaOverLambda(g.h, g.k, g.l, recip);
-    if (s > 0) uniques.push({ s, members: g.members });
+    if (s > 0) uniques.push({ s, members: g.members, allowed: !latticeTest || latticeTest({ h: g.h, k: g.k, l: g.l }) });
   }
   if (uniques.length < 40) {
     return { error: `Only ${uniques.length} unique reflections — too few for resolution shells.` };
@@ -132,9 +132,9 @@ function computeShellStatistics(reflections, cell, groupMatrices, targetShells =
   const shells = chunks.map((chunk, i) => {
     const lo = i === 0 ? 0 : bounds[i - 1];
     const sLo = i === 0 ? uniques[0].s : lo;
-    return accumulateShell(chunk, sLo, bounds[i], possibleIn(i === 0 ? -1 : lo, bounds[i]));
+    return accumulateShell(chunk, sLo, bounds[i], possibleIn(i === 0 ? -1 : lo, bounds[i]), chunk.filter(u => u.allowed).length);
   });
-  const overall = accumulateShell(uniques, uniques[0].s, sMax, haveTheory ? theory.length : null);
+  const overall = accumulateShell(uniques, uniques[0].s, sMax, haveTheory ? theory.length : null, uniques.filter(u => u.allowed).length);
   const cutoffIndex = shells.findIndex(sh => sh.meanISigma !== null && sh.meanISigma < 2);
   return { shells, overall, cutoffIndex, haveTheory };
 }
@@ -171,7 +171,7 @@ function renderShellStatistics(container, stats, info) {
     ? `<p style="color:#a60;"><small>⚠ No repeated observations: R values are undefined (data already merged to a unique set).</small></p>` : '';
 
   container.innerHTML = `
-    <p><small>Merged under Laue class ${info.laue}${info.assumed ? ' (assumed, not confirmed by merging)' : ''}; ${info.lattice}.
+    <p><small>Merged under Laue class ${info.laue}${info.source === 'cif' ? ' (from the CIF space group)' : info.source === 'merging' ? ' (confirmed by merging)' : ' (assumed — highest-symmetry candidate for this cell, not confirmed)'}; ${info.lattice}.
       Shells have equal width in d*³ (the same number of possible unique reflections each), from low to high resolution.
       Where the mean intensity approaches zero the R values grow without limit — use ⟨I/σ⟩ there.</small></p>
     <table class="shellTable">
@@ -185,7 +185,7 @@ function renderShellStatistics(container, stats, info) {
       <ul>
         <li><strong>d range</strong> — resolution shell in Å (low to high resolution).</li>
         <li><strong>Unique</strong> / <strong>Redundancy</strong> — symmetry-unique reflections measured in the shell, and how often each was measured on average.</li>
-        <li><strong>Complete</strong> — measured unique reflections divided by the unique reflections the cell, lattice centering and Laue class allow in that shell (hover for the counts). Below 95 % is shown in orange: gaps in the data (beamstop, detector gaps, short scan). The bottom row is the completeness up to the highest measured resolution. It counts lattice-allowed reflections only — if the file was already cleaned of screw/glide absences, the value is too low.</li>
+        <li><strong>Complete</strong> — measured unique reflections divided by the unique reflections the cell, lattice centering and Laue class allow in that shell (hover for the counts). Below 95 % is shown in orange: gaps in the data (beamstop, detector gaps, short scan). The bottom row is the completeness up to the highest measured resolution. Reflections that the lattice centering forbids, or that the absence scan found to be systematically absent (screw axes, glides), count neither as possible nor as measured — so files already cleaned of absences (deposited CIF/.hkl data) are not penalised. If a systematic absence was NOT recognised by the scan, the value is too low.</li>
         <li><strong>⟨I/σ⟩</strong> — mean signal-to-noise of the merged reflections (intensity divided by its standard uncertainty σ). Higher is better; a common rule of thumb puts the resolution limit where it falls below about 2.</li>
         <li><strong>I &gt; 2σ</strong> — share of merged reflections whose intensity is more than twice its uncertainty ("observed" reflections).</li>
         <li><strong>R<sub>int</sub></strong> — spread of equivalent measurements around their mean, Σ|I − ⟨I⟩| / ΣI. It grows with redundancy even when the data get better.</li>

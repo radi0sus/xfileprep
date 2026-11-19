@@ -219,19 +219,26 @@ function determineLaueClass(reflections, candidateLaueClasses, options = {}) {
   // classifyCellMetric's laueClasses order) — walk it in reverse (lowest
   // symmetry first).
   const lowToHigh = evaluations.slice().reverse();
-  let chosen = lowToHigh[0];
+  // A candidate with no redundant group has undefined Rint. It cannot be
+  // the baseline of a ratio comparison: skip it and start at the first
+  // informative (non-null Rint) candidate, then compare informative classes
+  // in increasing symmetry. Null candidates provide no jump signal.
+  let chosen = redundancyInformative
+    ? lowToHigh.find(e => e.rInt !== null)
+    : lowToHigh[0];
   let jumpDetectedAt = null;
 
   if (redundancyInformative) {
-    for (let i = 1; i < lowToHigh.length; i++) {
-      const candidate = lowToHigh[i];
-      if (candidate.rInt === null || chosen.rInt === null) break; // insufficient data to compare
-      const ratio = candidate.rInt / chosen.rInt;
+    let previousInformative = chosen;
+    for (const candidate of lowToHigh) {
+      if (candidate.rInt === null || candidate === chosen) continue;
+      const ratio = candidate.rInt / previousInformative.rInt;
       if (ratio > jumpFactor) {
         jumpDetectedAt = candidate.laueClass;
         break;
       }
       chosen = candidate;
+      previousInformative = candidate;
     }
   }
 

@@ -39,6 +39,17 @@ function isWeak(f2, sigma) {
 // MAX_TAIL_PERCENT of its reflections are individually significant.
 const MAX_TAIL_PERCENT = 50;
 
+// The median test above compares the forbidden class with an ABSOLUTE
+// threshold (I/σ < 3). That is not enough on weakly diffracting data: when
+// even the allowed class has a median I/σ of only ~4, a forbidden class that
+// is really present (pseudo-centering, e.g. weak h+l odd reflections of a
+// primitive cell with a pseudo-B translation) also falls below 3. So the
+// weak-tail rule only applies if the forbidden class is weak RELATIVE to the
+// allowed one: its mean intensity must stay below this percentage of the
+// allowed class's mean. Truly absent classes sit at ≲1 % (Renninger and
+// neighbour leakage); a class at tens of percent is simply weak data.
+const MAX_TAIL_MEAN_RATIO_PERCENT = 10;
+
 function median(values) {
   if (values.length === 0) return null;
   const a = [...values].sort((x, y) => x - y);
@@ -112,7 +123,8 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
     verdict = 'inconclusive';
     reason = `even the allowed class is mostly weak here (only ${allowedPresentPercent.toFixed(0)}% present) — nothing to compare the forbidden class against`;
   } else if (violationPercent > violationPercentThreshold) {
-    if (medianISigma !== null && medianISigma < ABSENCE_SIGNIFICANCE_THRESHOLD && violationPercent <= MAX_TAIL_PERCENT) {
+    if (medianISigma !== null && medianISigma < ABSENCE_SIGNIFICANCE_THRESHOLD && violationPercent <= MAX_TAIL_PERCENT
+        && meanRatioPercent < MAX_TAIL_MEAN_RATIO_PERCENT) {
       // typical forbidden reflection is insignificant; the significant ones are
       // the upper tail of residual intensity, not a real violation
       verdict = 'holds';
@@ -120,6 +132,7 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
         + `(forbidden/allowed mean intensity ${meanRatioPercent.toFixed(2)}%) — a weak residual tail, not a violation`;
     } else {
       verdict = 'violated';
+      reason = `${violationPercent.toFixed(0)}% of the forbidden reflections exceed ${ABSENCE_SIGNIFICANCE_THRESHOLD}σ and their mean intensity is ${meanRatioPercent.toFixed(1)}% of the allowed class — present, not absent`;
     }
   } else {
     verdict = 'holds';

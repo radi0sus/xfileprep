@@ -62,17 +62,27 @@ function parseHKL(text) {
 function summarizeHKL(reflections) {
   if (reflections.length === 0) return { count: 0 };
 
-  const hs = reflections.map(r => r.h);
-  const ks = reflections.map(r => r.k);
-  const ls = reflections.map(r => r.l);
-  const f2s = reflections.map(r => r.f2);
+  // Plain loop instead of Math.min(...array): spreading a six-figure array
+  // into a call overflows the call stack (JavaScriptCore on iPad/iPhone
+  // already fails at ~65k arguments, V8 at ~120k), and real data sets
+  // easily hold 140 000 reflections.
+  const lo = { h: Infinity, k: Infinity, l: Infinity, f2: Infinity };
+  const hi = { h: -Infinity, k: -Infinity, l: -Infinity, f2: -Infinity };
+  let sumF2 = 0;
+  for (const r of reflections) {
+    if (r.h < lo.h) lo.h = r.h; if (r.h > hi.h) hi.h = r.h;
+    if (r.k < lo.k) lo.k = r.k; if (r.k > hi.k) hi.k = r.k;
+    if (r.l < lo.l) lo.l = r.l; if (r.l > hi.l) hi.l = r.l;
+    if (r.f2 < lo.f2) lo.f2 = r.f2; if (r.f2 > hi.f2) hi.f2 = r.f2;
+    sumF2 += r.f2;
+  }
 
   return {
     count: reflections.length,
-    hRange: [Math.min(...hs), Math.max(...hs)],
-    kRange: [Math.min(...ks), Math.max(...ks)],
-    lRange: [Math.min(...ls), Math.max(...ls)],
-    f2Range: [Math.min(...f2s), Math.max(...f2s)],
-    meanF2: f2s.reduce((a, b) => a + b, 0) / f2s.length,
+    hRange: [lo.h, hi.h],
+    kRange: [lo.k, hi.k],
+    lRange: [lo.l, hi.l],
+    f2Range: [lo.f2, hi.f2],
+    meanF2: sumF2 / reflections.length,
   };
 }

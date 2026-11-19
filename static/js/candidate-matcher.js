@@ -36,6 +36,27 @@ function hallSymbolIsCentrosymmetric(hallSymbol) {
   return rotations.some(R => R.every((row, i) => row.every((v, j) => v === (i === j ? -1 : 0))));
 }
 
+// Maps space-group metadata from a parsed CIF to the diffraction Laue class.
+// Hall symbols are unambiguous; use H-M plus IT number only when Hall is absent.
+// Returns null when metadata is absent, unmatched, or incompatible with the
+// metric-derived candidates; callers may then use their data-driven fallback.
+function laueClassFromCIFMetadata(cell, candidates, monoclinicAxis = 'b') {
+  if (!cell) return null;
+  let entries = [];
+  if (cell.reportedHallSymbol) {
+    entries = HALL_SYMBOLS_TABLE.filter(e => e.hall === cell.reportedHallSymbol.trim());
+  } else if (cell.reportedSpaceGroupNumber !== null && cell.reportedSpaceGroup) {
+    const normalize = s => String(s).toLowerCase().replace(/\s+/g, '').replace(/:/g, '');
+    entries = HALL_SYMBOLS_TABLE.filter(e => e.number === cell.reportedSpaceGroupNumber &&
+      normalize(e.hm) === normalize(cell.reportedSpaceGroup));
+  }
+  for (const entry of entries) {
+    const match = candidates.find(name => candidateMatchesLaueClass(entry.hall, name, monoclinicAxis));
+    if (match) return match;
+  }
+  return null;
+}
+
 function matrixSetKey(matrices) {
   return matrices.map(m => m.map(r => r.join(',')).join(';')).sort().join('|');
 }
@@ -157,6 +178,23 @@ function scoreCandidate(hallSymbol, observedScan) {
       match: matchFraction(calcPeriod !== 1, reference.violationPercent),
       weight: reference.reflectionCount, // every period partitions the SAME reflection set on this axis, so the weight is period-independent
     });
+
+    // The checks above only ask "does the predicted absence hold?". A candidate
+    // that predicts the WEAKER condition (l = 2n) is not contradicted by data
+    // that obey the STRONGER one (l = 4n) unless this is asked explicitly: if
+    // period 4 holds, the l = 4n+2 reflections are absent, which a candidate
+    // predicting only l = 2n says should be present. (I 4 c m vs. I 4₁ c d:
+    // the 4₁ axis shows up on 00l only as l = 4n, so without this check both
+    // scored the same.) Stricter periods are the multiples of the predicted one.
+    if (calcPeriod > 1) {
+      for (const stricter of informative.filter(r => r.period > calcPeriod && r.period % calcPeriod === 0)) {
+        checks.push({
+          label: `${axis} period ${stricter.period} (stricter than the predicted ${calcPeriod})`,
+          match: matchFraction(false, stricter.violationPercent),
+          weight: stricter.reflectionCount,
+        });
+      }
+    }
   }
 
   for (const zone of ['0kl', 'h0l', 'hk0']) {

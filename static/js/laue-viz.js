@@ -67,8 +67,8 @@ function drawLaueZone(canvas, points, cfg, cell, Iref, mode, zoom = 1) {
   }
 }
 
-function renderLaueOverview(containerEl, noteEl, reflections, cell, laueClass) {
-  _lastLaueArgs = [containerEl, noteEl, reflections, cell, laueClass];
+function renderLaueOverview(containerEl, noteEl, reflections, cell, laueClass, laueSource = 'merging') {
+  _lastLaueArgs = [containerEl, noteEl, reflections, cell, laueClass, laueSource];
   const modeEl = document.getElementById('laueScaleSelect');
   const mode = modeEl ? modeEl.value : 'area';
 
@@ -77,7 +77,7 @@ function renderLaueOverview(containerEl, noteEl, reflections, cell, laueClass) {
   for (const r of reflections) seen.add(r.h + ',' + r.k + ',' + r.l);
   const redundancy = reflections.length / Math.max(1, seen.size);
   let note = laueClass
-    ? `<p>Laue class from merging: <strong>${laueClass}</strong></p>`
+    ? `<p>Laue class ${laueSource === 'cif' ? 'from the CIF space group' : 'from merging'}: <strong>${laueClass}</strong></p>`
     : `<p><em>Laue class not determined from merging.</em></p>`;
   if (redundancy < 1.05) {
     note += `<p style="color:#a60;"><small>⚠ Almost no repeated observations (mean redundancy ${redundancy.toFixed(2)}) — the data look already merged to a unique set, ` +

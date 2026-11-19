@@ -21,7 +21,7 @@
     let determinedLaueClass = null;
     let lastRawText = null;
     let lastCellExtras = null;
-    let determinedLaueClassSource = null; // 'merging' | null
+    let determinedLaueClassSource = null; // 'cif' | 'merging' | null
     let lastMatchResults = null;
     let selectedCandidateIndex = 0;
     let selectionSource = 'default'; // 'default' | 'manual' | 'auto-e-stat'
@@ -146,18 +146,60 @@
       document.getElementById('laueVizSection').style.display = 'block';
       document.getElementById('laueVizEmpty').style.display = 'none';
       renderLaueOverview(document.getElementById('laueVizContainer'), document.getElementById('laueVizNote'),
-        lastReflections, readCellOrNull(), determinedLaueClass);
+        lastReflections, readCellOrNull(), determinedLaueClass, determinedLaueClassSource);
       renderShellStats();
+      renderLayerViewer();
     }
 
     // Drops the reflections that the OBSERVED lattice centering forbids (zero by
     // construction, they would distort every statistic). Independent of the
     // space-group match, so the E² and shell statistics do not wait for it.
+    // Absence scan, computed once per loaded data set (the E² tab, the shell
+    // table and the layer viewer all need it).
+    let _scanCache = { reflections: null, scan: null };
+    function cachedAbsenceScan() {
+      if (_scanCache.reflections !== lastReflections) {
+        _scanCache = { reflections: lastReflections, scan: scanAllAbsences(lastReflections) };
+      }
+      return _scanCache.scan;
+    }
+
+    // Drops the reflections that the OBSERVED lattice centering forbids (zero by
+    // construction, they would distort every statistic). Independent of the
+    // space-group match, so the E² and shell statistics do not wait for it.
+    // `allowedTest` additionally excludes positions that the absence scan found
+    // to be systematically forbidden (screw axes, glides): it defines which
+    // reflections COUNT as possible for the completeness and the shell
+    // boundaries. Data that were already cleaned of absences (deposited CIF
+    // /.hkl files) would otherwise look incomplete.
     function observedLatticeFilter() {
-      const centering = scanLatticeCentering(lastReflections);
-      const centName = Object.entries(centering)
+      const scan = cachedAbsenceScan();
+      const centName = Object.entries(scan.centering)
         .find(([name, r]) => name !== 'P (primitive)' && r.verdict === 'holds')?.[0] || 'P (primitive)';
-      return filterByLattice(lastReflections, centName[0]);
+      const lat = filterByLattice(lastReflections, centName[0]);
+      const allowedTest = r => (!lat.test || lat.test(r)) && !isForbiddenByHeldConditions(scan, r.h, r.k, r.l);
+      return { ...lat, allowedTest, scan };
+    }
+
+    // Layer viewer (layer-viewer.js): same Laue class / observed lattice as the
+    // shell table; the absence scan keeps systematically forbidden positions
+    // from being drawn as gaps.
+    function renderLayerViewer() {
+      const el = document.getElementById('layerViewerContainer');
+      if (!el) return;
+      if (!lastReflections) { el.innerHTML = ''; return; }
+      const cell = readCellOrNull();
+      if (!cell) { el.innerHTML = ''; return; }
+      try {
+        const classification = classifyCellMetric(cell);
+        const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
+        const laue = determinedLaueClass || classification.laueClasses[0];
+        const group = generateGroup(getLaueClassGenerators(laue, monoclinicAxis));
+        const lat = observedLatticeFilter();
+        initLayerViewer(el, { reflections: lastReflections, cell, group, latticeTest: lat.allowedTest, scan: lat.scan, laue, source: determinedLaueClassSource });
+      } catch (err) {
+        el.innerHTML = `<p style="color:#b00"><small>Could not build the layer viewer: ${err.message}</small></p>`;
+      }
     }
 
     // Resolution-shell merging statistics (shell-stats.js) under the Laue
@@ -177,8 +219,8 @@
         const laue = determinedLaueClass || classification.laueClasses[0];
         const group = generateGroup(getLaueClassGenerators(laue, monoclinicAxis));
         const lat = observedLatticeFilter();
-        const stats = computeShellStatistics(lat.reflections, cell, group, 10, lat.test);
-        renderShellStatistics(el, stats, { laue, assumed: !determinedLaueClass, lattice: lat.note });
+        const stats = computeShellStatistics(lat.reflections, cell, group, 10, lat.allowedTest);
+        renderShellStatistics(el, stats, { laue, source: determinedLaueClassSource, lattice: lat.note });
       } catch (err) {
         el.innerHTML = `<p style="color:#b00"><small>Could not compute shell statistics: ${err.message}</small></p>`;
       }
@@ -329,6 +371,7 @@
       if (cell.z !== null) extras.push(`Z = ${cell.z}`);
       if (cell.wavelength !== null) extras.push(`λ = ${cell.wavelength} Å`);
       if (cell.reportedSpaceGroup !== null) extras.push(`reported space group: ${cell.reportedSpaceGroup}`);
+      if (cell.reportedHallSymbol !== null) extras.push(`Hall: ${cell.reportedHallSymbol}`);
       cellExtraEl.innerHTML = extras.length > 0 ? `<p>${extras.join(' · ')}</p>` : '';
 
       const formula = parseChemicalFormula(text);
@@ -698,8 +741,15 @@
 
         // deferred so the "merging…" message actually paints before the (synchronous) work runs
         setTimeout(() => {
-        const { chosen, jumpDetectedAt, evaluations, redundancyInformative } =
-          determineLaueClass(lastReflections, classification.laueClasses, { monoclinicAxis });
+        const mergingResult = determineLaueClass(lastReflections, classification.laueClasses, { monoclinicAxis });
+        const { jumpDetectedAt, evaluations, redundancyInformative } = mergingResult;
+        // A CIF space-group assignment is an independent symmetry source.
+        // Its point group, completed by Friedel inversion, fixes the Laue
+        // class; merged deposited Fo/Fc datasets often have no equivalent
+        // repeats, so Rint cannot recover it. Prefer it when consistent with
+        // the observed cell metric; otherwise retain the data-driven result.
+        const cifLaueClass = laueClassFromCIFMetadata(lastCellExtras, classification.laueClasses, monoclinicAxis);
+        const chosen = cifLaueClass || mergingResult.chosen;
 
         // With no redundant (duplicate) observations under ANY candidate,
         // Rint is undefined everywhere and this method has no signal at
@@ -708,8 +758,8 @@
         // Don't treat that as determined; leave it unset so the
         // space-group matching step keeps warning the user honestly
         // instead of quietly trusting it.
-        determinedLaueClass = redundancyInformative ? chosen : null;
-        determinedLaueClassSource = redundancyInformative ? 'merging' : null;
+        determinedLaueClass = cifLaueClass || (redundancyInformative ? chosen : null);
+        determinedLaueClassSource = cifLaueClass ? 'cif' : (redundancyInformative ? 'merging' : null);
 
         const rows = evaluations.map(r => `
           <tr ${r.laueClass === chosen ? 'style="font-weight:bold;background:#f3fbf6;"' : ''}>
@@ -724,7 +774,10 @@
           ? `<p><small>Stopped before <strong>${jumpDetectedAt}</strong> — R<sub>int</sub> jumped there by more than the 50% tolerance, so that candidate's extra symmetry doesn't seem to be real.</small></p>`
           : '';
 
-        const verdictBlock = redundancyInformative
+        const verdictBlock = cifLaueClass
+          ? `<p><strong>Laue class from CIF space group: ${chosen}</strong> — ${lastCellExtras.reportedSpaceGroup || `space-group #${lastCellExtras.reportedSpaceGroupNumber}`} (${lastCellExtras.reportedHallSymbol || 'Hall symbol unavailable'}). The R<sub>int</sub> table is shown as an independent check; merged/refinement HKL may not contain redundancy to redetermine the class.</p>
+             ${jumpNote}`
+          : redundancyInformative
           ? `<p><strong>Auto-picked: ${chosen}</strong> — highest symmetry candidate with no R<sub>int</sub> jump from the baseline.</p>
              ${jumpNote}
              <p><small>This is a heuristic (50% relative R<sub>int</sub> increase tolerated) — cross-check against the table above, especially in borderline cases.</small></p>`
@@ -952,9 +1005,11 @@
         const classification = classifyCellMetric(values);
         const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
         const targetLaueClass = determinedLaueClass || classification.laueClasses[0];
-        const laueClassNote = determinedLaueClassSource === 'merging'
-          ? `confirmed via merging statistics`
-          : `assumed — highest-symmetry candidate for this cell; merging did not confirm a Laue class`;
+        const laueClassNote = determinedLaueClassSource === 'cif'
+          ? `from CIF space-group symmetry`
+          : determinedLaueClassSource === 'merging'
+            ? `confirmed via merging statistics`
+            : `assumed — highest-symmetry candidate for this cell; no source confirmed a Laue class`;
 
         const scan = scanAllAbsences(lastReflections);
         const results = matchSpaceGroupCandidates(HALL_SYMBOLS_TABLE, targetLaueClass, scan, { monoclinicAxis });
@@ -1003,7 +1058,7 @@
             <td>${r.entry.number}${r.entry.qualifier ? ':' + r.entry.qualifier : ''}</td>
             <td>${formatHM(r.entry.hm)}</td>
             <td>${r.entry.hall}</td>
-            <td>${(r.score * 100).toFixed(0)}%</td>
+            <td>${(r.score * 100).toFixed(1)}%</td>
             <td>${describeSetting(r.entry)}</td>
           </tr>`;
         const rows = topTen.map((r, i) => rowHtml(r, i)).join('')
@@ -1020,6 +1075,31 @@
              whichever row is selected, not just the top one.</p>`
           : '';
 
+        // Close runners-up that LOSE on a clear, clean difference — otherwise their
+        // percentages look like a tie (the shared zone checks involve thousands of
+        // reflections, a decisive axial check only dozens). Listed: checks where the
+        // runner-up is clearly wrong (match < 20 %) and the top candidate is clearly right
+        // (or the check only exists for the runner-up), with at least 8 reflections behind it.
+        const runnerUpNotes = results.slice(1, 8)
+          .filter(r => topScore - r.score <= 0.03 && r.score !== topScore)
+          .map(r => {
+            const bad = r.checks.filter(c => c.match < 0.2 && c.weight >= 8).filter(c => {
+              const t = results[0].checks.find(x => x.label === c.label);
+              return !t || t.match > 0.8;
+            });
+            return bad.length ? { r, bad } : null;
+          })
+          .filter(Boolean).slice(0, 5)
+          .map(({ r, bad }) => `<li><strong>${formatHM(r.entry.hm)}</strong> (${(r.score * 100).toFixed(1)}%): ` + bad.map(c => {
+            const stricter = c.label.match(/^(\S+) period (\d+) \(stricter than the predicted (\d+)\)/);
+            return stricter
+              ? `${stricter[1]}: the data obey period ${stricter[2]}, but this candidate only predicts period ${stricter[3]}`
+              : `${c.label}: opposite of what the data show`;
+          }).join('; ') + '</li>');
+        const runnerUpHtml = runnerUpNotes.length
+          ? `<details class="explain" open><summary>Why close runners-up score lower</summary><p><small>The percentages above can look like a tie because the shared checks involve far more reflections than the decisive ones. These rows lose on a clear difference:</small></p><ul>${runnerUpNotes.join('')}</ul></details>`
+          : '';
+
         spaceGroupResultEl.innerHTML = `
           <h2>Space group candidates</h2>
           <p><small>Assumed Laue class: ${targetLaueClass} (${laueClassNote})</small></p>
@@ -1028,6 +1108,7 @@
             <tr><th>Use</th><th>No.</th><th>H-M symbol</th><th>Hall symbol</th><th>Match</th><th>Setting</th></tr>
             ${rows}
           </table>
+          ${runnerUpHtml}
           <p><small>Pick a different row any time before generating the .ins — it always uses whichever one is selected here, not just the top-scoring one.</small></p>
           <details class="explain"><summary>How the match score works</summary><p><small>Match % = share of calculated reflection conditions that agree with the observed scan, weighted by how many reflections
           actually informed each check — a solid signal from thousands of reflections outweighs a shaky one from a sparse axial row (a check
@@ -1122,7 +1203,7 @@
         // Centering absences are zero by construction (lattice, not structure):
         // exclude them (observed lattice) before merging.
         const latticeInfo = observedLatticeFilter();
-        const stats = computeEStatistics(latticeInfo.reflections, values, compInfo.composition, group, latticeInfo.test);
+        const stats = computeEStatistics(latticeInfo.reflections, values, compInfo.composition, group, latticeInfo.allowedTest);
 
         if (stats.error) {
           eStatResultEl.innerHTML = `<p style="color:#b00">${stats.error}</p>`;
@@ -1203,7 +1284,7 @@
 
         eStatResultEl.innerHTML = `
           <h2>E² statistics (Wilson plot)</h2>
-          <p><small>Composition: ${compInfo.source} · merged under Laue class ${targetLaueClass}${determinedLaueClassSource === 'merging' ? '' : ' (assumed, not yet confirmed above)'}
+          <p><small>Composition: ${compInfo.source} · merged under Laue class ${targetLaueClass}${determinedLaueClassSource === 'merging' ? '' : determinedLaueClassSource === 'cif' ? ' (from the CIF space group)' : ' (assumed, not yet confirmed above)'}
           · ${stats.uniqueReflections} unique reflections (${stats.usableReflections} usable)<br>${latticeInfo.note}</small></p>
           <table>
             <tr><th></th><th>this data</th><th>ref. centrosymmetric</th><th>ref. acentric</th></tr>

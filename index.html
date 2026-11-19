@@ -86,6 +86,14 @@
       <div id="laueVizNote"></div>
       <div id="laueVizContainer" class="laueGrid"></div>
 
+      <h2>Layer viewer</h2>
+      <details class="explain"><summary>How to read this</summary><p><small>Page through the reciprocal lattice layer by layer (hk0, hk1, hk2 … or h0l, h1l … or 0kl, 1kl …), drawn in the true reciprocal metric like the plots above.
+        Circles = mean intensity per lattice point (same scale and size setting as above). <span style="color:#d33">Red rings</span> mark <strong>gaps</strong>: positions that the lattice centering allows and
+        that lie inside the measured resolution range, but that were not measured — and neither was any symmetry equivalent under the Laue class used here. A reflection that is missing but whose symmetry
+        equivalent was measured is not a gap. Positions that the absence scan found to be systematically forbidden are not marked. Beamstop shadows, detector gaps and short scans show up as clusters of rings.
+        Click the picture to enlarge it.</small></p></details>
+      <div id="layerViewerContainer"></div>
+
       <h2>Resolution shells (merging statistics)</h2>
       <p><small>Where do the data stop being useful? Information only — no cut-off is applied to the .ins or the .hkl.</small></p>
       <div id="shellStatsContainer"></div>
@@ -155,6 +163,7 @@
   <script src="static/js/d-spacing.js"></script>
   <script src="static/js/e-statistics.js"></script>
   <script src="static/js/shell-stats.js"></script>
+  <script src="static/js/layer-viewer.js"></script>
   <script src="static/js/app.js"></script>
 </div>
 </body>
