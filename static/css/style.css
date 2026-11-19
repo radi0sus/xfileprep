@@ -328,3 +328,9 @@ details.shellLegend { margin: 0.4rem 0 1rem; font-size: 0.88rem; }
 details.shellLegend summary { cursor: pointer; color: var(--text-muted); }
 details.shellLegend ul { margin: 0.5rem 0 0.3rem 1.1rem; padding: 0; }
 details.shellLegend li { margin: 0.25rem 0; }
+
+/* long explanatory texts fold away by default */
+details.explain { margin: 0.4rem 0 0.9rem; }
+details.explain > summary { cursor: pointer; color: var(--text-muted); font-size: 0.85rem; }
+details.explain[open] > summary { margin-bottom: 0.3rem; }
+details.explain > p { margin: 0.3rem 0; }

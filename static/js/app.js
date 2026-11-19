@@ -16,7 +16,6 @@
     const formulaInput = document.getElementById('formulaInput');
     const applyFormulaBtn = document.getElementById('applyFormulaBtn');
     const formulaUpdateNoteEl = document.getElementById('formulaUpdateNote');
-    const laueBtn = document.getElementById('determineLaueBtn');
     const laueResultEl = document.getElementById('laueResult');
     let lastReflections = null;
     let determinedLaueClass = null;
@@ -115,7 +114,6 @@
       return `<span style="color:#069" title="Your cell/hkl as measured natively match ${formatHM(native.hm)}. To use this row (${formatHM(entry.hm)}) instead, transform with this matrix.">as measured (${formatHM(native.hm)}) → <strong>${formatHM(entry.hm)}</strong><br><code style="font-size:0.85em">${formatHKLFMatrix(matrix)}</code>${esdNote}</span>`;
     }
 
-    const absencesBtn = document.getElementById('scanAbsencesBtn');
     const absencesResultEl = document.getElementById('absencesResult');
 
     const VERDICT_STYLE = {
@@ -152,6 +150,16 @@
       renderShellStats();
     }
 
+    // Drops the reflections that the OBSERVED lattice centering forbids (zero by
+    // construction, they would distort every statistic). Independent of the
+    // space-group match, so the E² and shell statistics do not wait for it.
+    function observedLatticeFilter() {
+      const centering = scanLatticeCentering(lastReflections);
+      const centName = Object.entries(centering)
+        .find(([name, r]) => name !== 'P (primitive)' && r.verdict === 'holds')?.[0] || 'P (primitive)';
+      return filterByLattice(lastReflections, centName[0]);
+    }
+
     // Resolution-shell merging statistics (shell-stats.js) under the Laue
     // class from merging (or the highest-symmetry candidate if none was
     // confirmed). Centering-absent reflections of the OBSERVED lattice are
@@ -168,10 +176,7 @@
         const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
         const laue = determinedLaueClass || classification.laueClasses[0];
         const group = generateGroup(getLaueClassGenerators(laue, monoclinicAxis));
-        const centering = scanLatticeCentering(lastReflections);
-        const centName = Object.entries(centering)
-          .find(([name, r]) => name !== 'P (primitive)' && r.verdict === 'holds')?.[0] || 'P (primitive)';
-        const lat = filterByLattice(lastReflections, centName[0]);
+        const lat = observedLatticeFilter();
         const stats = computeShellStatistics(lat.reflections, cell, group);
         renderShellStatistics(el, stats, { laue, assumed: !determinedLaueClass, lattice: lat.note });
       } catch (err) {
@@ -214,7 +219,7 @@
           <h3>Zonal conditions (glide planes)</h3>
           <table><tr><th>Zone</th><th>Condition</th><th>Status</th></tr>${zonalRows}</table>
 
-          <p><small>Percentage = share of "forbidden" reflections that are still significant (I/σ ≥ 3) — 0% is the clean case.
+          <details class="explain"><summary>How to read these results</summary><p><small>Percentage = share of "forbidden" reflections that are still significant (I/σ ≥ 3) — 0% is the clean case.
           A zonal condition consistent with the lattice centering alone (e.g. an apparent glide in a zone that intersects the
           centering condition) doesn't imply an independent glide plane — check the centering result first.
           <strong>"Undetermined"</strong> means the test itself isn't trustworthy either way — hover a cell for the specific reason.
@@ -222,7 +227,7 @@
           class itself is mostly weak too (common for a condition that only really shows up at higher resolution) — in both cases
           the percentage next to it isn't meaningful evidence, whether it's 0% or high.
           A condition can also read <strong>"satisfied"</strong> despite a non-zero percentage: if the <em>median</em> I/σ of the forbidden class is below 3
-          (hover the cell), the significant ones are just the upper tail of weak residual intensity. The plots below grey out cells forbidden by such accepted conditions.</small></p>`;
+          (hover the cell), the significant ones are just the upper tail of weak residual intensity. The plots below grey out cells forbidden by such accepted conditions.</small></p></details>`;
 
         document.getElementById('absenceVizSection').style.display = 'block';
         renderAbsenceVisuals(
@@ -236,7 +241,6 @@
         }, 10);
       });
     }
-    absencesBtn.addEventListener('click', () => { runAbsencesScan(); });
 
 
     // Reads the current cell fields and (re-)shows the metric classification.
@@ -270,7 +274,7 @@
     // Same idea for the formula field: E² statistics needs a composition,
     // which for raw HKL / no-.ins data usually only shows up once the
     // person types a formula by hand — pick that up automatically too,
-    // rather than requiring a manual "Compute E² statistics" click. Also
+    // rather than requiring a manual step. Also
     // wired to an explicit "Apply formula" button/click, since the results
     // (Wilson plot, .ins) live on other tabs and a silent background
     // recompute is easy to miss — this button gives a deliberate action
@@ -502,19 +506,15 @@
       noteLoaded('reflections', file.name, `(${reflections.length} refl.)`);
       determinedLaueClass = null;
       determinedLaueClassSource = null;
-      laueBtn.style.display = 'inline-block';
       laueResultEl.innerHTML = '';
-      absencesBtn.style.display = 'inline-block';
       absencesResultEl.innerHTML = '';
-      spaceGroupBtn.style.display = 'inline-block';
       spaceGroupResultEl.innerHTML = '';
-      eStatBtn.style.display = 'inline-block';
       eStatResultEl.innerHTML = '';
       const stats = summarizeHKL(reflections);
 
       sourceInfoEl.innerHTML = `<p><strong>Source:</strong> ${SOURCE_LABELS[source] || source}</p>`;
 
-      // HKL export (Tab 5): only offered when the reflections came out of a
+      // HKL export (Tab 6): only offered when the reflections came out of a
       // CIF — a raw SHELX .hkl is already in the right format. Written
       // untransformed; the embedded block is kept verbatim, a _refln loop is
       // re-written in SHELX format (3I4,2F8.2,I4).
@@ -746,9 +746,7 @@
         }, 10);
       });
     }
-    laueBtn.addEventListener('click', async () => { await runLaueDetermination(); renderLaueTab(); });
 
-    const spaceGroupBtn = document.getElementById('matchSpaceGroupBtn');
     const spaceGroupResultEl = document.getElementById('spaceGroupResult');
 
     const insBtn = document.getElementById('generateInsBtn');
@@ -841,7 +839,7 @@
       // need to be second-guessed here.
       const tieNote = tiedOpposite && selectionSource !== 'manual'
         ? (selectionSource === 'auto-e-stat'
-            ? `<p style="color:#080"><strong>✓ ${formatHM(top.hm)} was picked over the tied ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}) based on the E² statistics result above</strong> —
+            ? `<p style="color:#080"><strong>✓ ${formatHM(top.hm)} was picked over the tied ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}) based on the E² statistics (tab 4)</strong> —
                absences alone couldn't distinguish them (both ${(topScore * 100).toFixed(0)}%), but the intensity-distribution check can, and did.</p>`
             : `<p style="color:#b00"><strong>⚠ This is tied at ${(topScore * 100).toFixed(0)}% with ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}), which is ${topIsCentro ? 'acentric' : 'centrosymmetric'}
                where this one is ${topIsCentro ? 'centrosymmetric' : 'acentric'}.</strong> Systematic absences alone cannot break a centrosymmetric/acentric tie — Friedel's law makes both look
@@ -867,7 +865,7 @@
     }
     insBtn.addEventListener('click', generateIns);
 
-    // Tab 5: "Save as .hkl" block, visible only while lastHklExport is set.
+    // Tab 6: "Save as .hkl" block, visible only while lastHklExport is set.
     const hklSaveSectionEl = document.getElementById('hklSaveSection');
     const hklSaveInfoEl = document.getElementById('hklSaveInfo');
     const hklSaveBtn = document.getElementById('hklSaveBtn');
@@ -956,7 +954,7 @@
         const targetLaueClass = determinedLaueClass || classification.laueClasses[0];
         const laueClassNote = determinedLaueClassSource === 'merging'
           ? `confirmed via merging statistics`
-          : `assumed — highest metric candidate; run "Determine Laue class" above first to confirm it properly`;
+          : `assumed — highest-symmetry candidate for this cell; merging did not confirm a Laue class`;
 
         const scan = scanAllAbsences(lastReflections);
         const results = matchSpaceGroupCandidates(HALL_SYMBOLS_TABLE, targetLaueClass, scan, { monoclinicAxis });
@@ -1018,7 +1016,7 @@
         const tieWarning = tiedOpposite
           ? `<p style="color:#b00"><strong>⚠ The top ${(topScore * 100).toFixed(0)}% match is tied between an acentric and a centrosymmetric option</strong>
              (${formatHM(results[0].entry.hm)} vs. ${formatHM(tiedOpposite.entry.hm)}) — systematic absences alone can never break that particular tie, by Friedel's law.
-             Run <strong>Compute E² statistics</strong> below, then pick whichever one it points to using the radio buttons — "Generate .ins" uses
+             The <strong>E² Statistics</strong> tab shows which one the intensity distribution favours — pick that one using the radio buttons — "Generate .ins" uses
              whichever row is selected, not just the top one.</p>`
           : '';
 
@@ -1031,13 +1029,13 @@
             ${rows}
           </table>
           <p><small>Pick a different row any time before generating the .ins — it always uses whichever one is selected here, not just the top-scoring one.</small></p>
-          <p><small>Match % = share of calculated reflection conditions that agree with the observed scan, weighted by how many reflections
+          <details class="explain"><summary>How the match score works</summary><p><small>Match % = share of calculated reflection conditions that agree with the observed scan, weighted by how many reflections
           actually informed each check — a solid signal from thousands of reflections outweighs a shaky one from a sparse axial row (a check
           where the data was inconclusive — too few reflections either way — doesn't count for or against at all). A less-than-100% match on an
           otherwise clear top candidate is often just the same small-sample noise the weighting already discounts, not a wrong space group.
           Acentric candidates are included alongside centrosymmetric ones — Friedel's law makes diffraction always look centrosymmetric
           regardless of the true crystal symmetry, so absences alone usually can't rule acentric options out; a close acentric/centrosymmetric
-          tie here is exactly the situation E² statistics is for.</small></p>`;
+          tie here is exactly the situation E² statistics is for.</small></p></details>`;
 
         spaceGroupResultEl.querySelectorAll('input[name="candidateSelect"]').forEach(input => {
           input.addEventListener('change', (e) => {
@@ -1050,9 +1048,7 @@
         }, 10);
       });
     }
-    spaceGroupBtn.addEventListener('click', () => { runSpaceGroupMatch(); });
 
-    const eStatBtn = document.getElementById('computeEStatBtn');
     const eStatResultEl = document.getElementById('eStatResult');
 
     // Composition for Wilson/E-statistics: prefer an exact whole-cell
@@ -1086,7 +1082,6 @@
       };
     }
 
-    eStatBtn.addEventListener('click', () => { runEStatistics(); });
 
     // Runs the Wilson-plot / E² statistics step. Returns a Promise<boolean>
     // (true if it actually computed something). When called automatically
@@ -1110,8 +1105,8 @@
 
         const compInfo = getUnitCellComposition();
         if (!compInfo) {
-          if (!silent) eStatResultEl.innerHTML = `<p style="color:#b00">Need the unit cell's element composition first — either drop the matching
-            SHELX .ins (exact SFAC/UNIT counts), or fill in the chemical formula field above (also needs Z, e.g. from a loaded CIF).</p>`;
+          eStatResultEl.innerHTML = `<p style="color:#b00">Need the unit cell's element composition first — either drop the matching
+            SHELX .ins (exact SFAC/UNIT counts), or fill in the chemical formula field on the File &amp; Cell tab (also needs Z, e.g. from a loaded CIF) — the statistics then appear here automatically.</p>`;
           resolve(false);
           return;
         }
@@ -1125,10 +1120,8 @@
         const group = generateGroup(getLaueClassGenerators(targetLaueClass, monoclinicAxis));
 
         // Centering absences are zero by construction (lattice, not structure):
-        // exclude them before merging, using the lattice of the selected candidate.
-        const selectedHall = lastMatchResults && lastMatchResults[selectedCandidateIndex]
-          ? lastMatchResults[selectedCandidateIndex].entry.hall : null;
-        const latticeInfo = filterByLattice(lastReflections, selectedHall);
+        // exclude them (observed lattice) before merging.
+        const latticeInfo = observedLatticeFilter();
         const stats = computeEStatistics(latticeInfo.reflections, values, compInfo.composition, group);
 
         if (stats.error) {
@@ -1168,7 +1161,7 @@
               generateIns(); // rebuild the .ins for the now-resolved candidate right away
               const radio = document.querySelector(`input[name="candidateSelect"][value="${newIndex}"]`);
               if (radio) radio.checked = true;
-              autoSelectNote = `<p style="color:#080"><strong>✓ Candidate selection updated above:</strong> switched the space-group pick to
+              autoSelectNote = `<p style="color:#080"><strong>✓ Candidate selection updated on the Space Group tab:</strong> switched the space-group pick to
                 ${formatHM(resolved.entry.hm)} (${resolved.entry.hall}) to match this ${stats.verdict} result — the SHELX .ins tab has been updated to match.</p>`;
             } else {
               autoSelectNote = `<p><small>This confirms the already-selected candidate (${formatHM(resolved.entry.hm)}).</small></p>`;
@@ -1189,15 +1182,16 @@
           </table>
           <p style="color:${verdictColor}"><strong>Best match: ${stats.verdict}</strong> <small>(margin ${(stats.margin * 100).toFixed(0)}% between the two reference distances — near 0% means right on the fence)</small></p>
           ${autoSelectNote}
-          <p><small>Wilson fit: B = ${stats.B.toFixed(2)} Å² (overall isotropic falloff), scale k = ${stats.k.toFixed(3)}. If &lt;E²&gt; above is far from 1.000, treat the verdict cautiously —
+          <p><small>Wilson fit: B = ${stats.B.toFixed(2)} Å² (overall isotropic falloff), scale k = ${stats.k.toFixed(3)}.</small></p>
+          <details class="explain"><summary>How to read these statistics</summary><p><small>If &lt;E²&gt; above is far from 1.000, treat the verdict cautiously —
           common real causes are a dominant heavy atom (breaks the "randomly distributed atoms" Wilson assumption, especially at low resolution), twinning, or non-ideal data scaling; none of those are
           errors in this calculation, they're properties of the data itself. This is a different question from the absences scan above — Friedel's law makes every diffraction pattern look centrosymmetric
-          regardless of the crystal's true symmetry, so this is the one of the two that can actually distinguish an acentric structure from a centrosymmetric one.</small></p>
+          regardless of the crystal's true symmetry, so this is the one of the two that can actually distinguish an acentric structure from a centrosymmetric one.</small></p></details>
           <div id="wilsonPlotContainer"></div>
           <h2>N(z) test (cumulative E² distribution)</h2>
-          <p><small>Shows the fraction of reflections with E² ≤ z against the ideal curves. Unlike the single number &lt;|E²−1|&gt; it uses the whole distribution,
+          <details class="explain"><summary>How to read the N(z) test</summary><p><small>Shows the fraction of reflections with E² ≤ z against the ideal curves. Unlike the single number &lt;|E²−1|&gt; it uses the whole distribution,
           so it also reveals <strong>twinning</strong> (a twinned acentric crystal sits between the two ideal curves, with too few weak reflections for a centric structure).
-          Closeness is the Kolmogorov distance D = largest vertical gap to each curve (smaller = better). With real data D rarely drops below ~0.02–0.05.</small></p>
+          Closeness is the Kolmogorov distance D = largest vertical gap to each curve (smaller = better). With real data D rarely drops below ~0.02–0.05.</small></p></details>
           <table>
             <tr><th></th><th>centrosymmetric</th><th>acentric</th><th>acentric, perfect twin</th></tr>
             <tr><td>D</td><td>${stats.nz.dCentro.toFixed(3)}</td><td>${stats.nz.dAcentric.toFixed(3)}</td><td>${stats.nz.dTwin.toFixed(3)}</td></tr>
