@@ -243,7 +243,7 @@
         }).join('');
 
         const zonalRows = Object.entries(scan.zonal).flatMap(([zone, results]) =>
-          results.map((r, i) => `<tr><td>${i === 0 ? zone : ''}</td><td>${r.name}</td>${verdictCell(r)}</tr>`)
+          results.map((r, i) => `<tr><td>${i === 0 ? (zone === 'hhl' ? 'hhl (diagonal plane)' : zone) : ''}</td><td>${r.name}</td>${verdictCell(r)}</tr>`)
         ).join('');
 
         absencesResultEl.innerHTML = `
@@ -262,6 +262,8 @@
           <table><tr><th>Zone</th><th>Condition</th><th>Status</th></tr>${zonalRows}</table>
 
           <details class="explain"><summary>How to read these results</summary><p><small>Percentage = share of "forbidden" reflections that are still significant (I/σ ≥ 3) — 0% is the clean case.
+          <strong>d-glide</strong> = quarter translation (the condition is on a sum modulo 4, e.g. k+l = 4n). <strong>hhl</strong> is the plane through the diagonal (k = h): there the glide/mirror planes
+          of tetragonal, trigonal/hexagonal and cubic groups show up; in other crystal systems that row only repeats the centering.
           A zonal condition consistent with the lattice centering alone (e.g. an apparent glide in a zone that intersects the
           centering condition) doesn't imply an independent glide plane — check the centering result first.
           <strong>"Undetermined"</strong> means the test itself isn't trustworthy either way — hover a cell for the specific reason.

@@ -195,32 +195,49 @@ function scanAxialCondition(reflections, axisName, periods = [2, 3, 4, 6]) {
   }));
 }
 
-// --- Zonal glide-plane conditions (0kl, h0l, hk0) -----------------------
-// d-glide (quarter-translation) isn't included — it needs an additional
-// same-parity check beyond a single mod-2/mod-4 condition and is rare
-// enough to leave as a future extension.
+// --- Zonal glide-plane conditions (0kl, h0l, hk0 and the diagonal plane hhl) --
+// Each condition is  a·p + b·q ≡ 0 (mod m)  on the two free indices (p, q) of
+// the zone, stored as `test: [a, b, m]` so the theoretical side
+// (reflection-conditions.js) can compare a candidate against exactly the same
+// tests. Free indices: 0kl → (k, l); h0l → (h, l); hk0 → (h, k); hhl → (h, l).
+//   mod 2 = a/b/c/n glides, mod 4 on a SUM = d-glide (quarter translation).
+// hhl is the plane through the diagonal (k = h): the mirror/glide planes ⊥ [1-10]
+// of tetragonal, ⊥ [210] of hexagonal/trigonal and the {110} planes of cubic
+// groups. Under 4-fold (or 3/6-fold) symmetry its partner h-hl is equivalent, so
+// one plane is enough; in other crystal systems nothing special happens there
+// (only the centering shows up), which affects all candidates alike.
 
 const ZONE_SELECTORS = {
   '0kl': r => r.h === 0,
   h0l: r => r.k === 0,
   hk0: r => r.l === 0,
+  hhl: r => r.h === r.k,
 };
 
 const ZONAL_CONDITIONS = {
   '0kl': [
-    { name: 'b-glide (k=2n)', valueOf: r => r.k },
-    { name: 'c-glide (l=2n)', valueOf: r => r.l },
-    { name: 'n-glide (k+l=2n)', valueOf: r => r.k + r.l },
+    { name: 'b-glide (k=2n)', valueOf: r => r.k, test: [1, 0, 2] },
+    { name: 'c-glide (l=2n)', valueOf: r => r.l, test: [0, 1, 2] },
+    { name: 'n-glide (k+l=2n)', valueOf: r => r.k + r.l, test: [1, 1, 2] },
+    { name: 'd-glide (k+l=4n)', valueOf: r => r.k + r.l, modulus: 4, test: [1, 1, 4] },
   ],
   h0l: [
-    { name: 'a-glide (h=2n)', valueOf: r => r.h },
-    { name: 'c-glide (l=2n)', valueOf: r => r.l },
-    { name: 'n-glide (h+l=2n)', valueOf: r => r.h + r.l },
+    { name: 'a-glide (h=2n)', valueOf: r => r.h, test: [1, 0, 2] },
+    { name: 'c-glide (l=2n)', valueOf: r => r.l, test: [0, 1, 2] },
+    { name: 'n-glide (h+l=2n)', valueOf: r => r.h + r.l, test: [1, 1, 2] },
+    { name: 'd-glide (h+l=4n)', valueOf: r => r.h + r.l, modulus: 4, test: [1, 1, 4] },
   ],
   hk0: [
-    { name: 'a-glide (h=2n)', valueOf: r => r.h },
-    { name: 'b-glide (k=2n)', valueOf: r => r.k },
-    { name: 'n-glide (h+k=2n)', valueOf: r => r.h + r.k },
+    { name: 'a-glide (h=2n)', valueOf: r => r.h, test: [1, 0, 2] },
+    { name: 'b-glide (k=2n)', valueOf: r => r.k, test: [0, 1, 2] },
+    { name: 'n-glide (h+k=2n)', valueOf: r => r.h + r.k, test: [1, 1, 2] },
+    { name: 'd-glide (h+k=4n)', valueOf: r => r.h + r.k, modulus: 4, test: [1, 1, 4] },
+  ],
+  hhl: [
+    { name: 'c-glide (l=2n)', valueOf: r => r.l, test: [0, 1, 2] },
+    { name: 'n-glide (h+l=2n)', valueOf: r => r.h + r.l, test: [1, 1, 2] },
+    { name: 'd-glide (2h+l=4n)', valueOf: r => 2 * r.h + r.l, modulus: 4, test: [2, 1, 4] },
+    { name: 'h=2n', valueOf: r => r.h, test: [1, 0, 2] },
   ],
 };
 
@@ -228,7 +245,7 @@ function scanZonalConditions(reflections, zoneName) {
   const relevant = reflections.filter(ZONE_SELECTORS[zoneName]);
   return ZONAL_CONDITIONS[zoneName].map(cond => ({
     name: cond.name,
-    ...judgeCondition(residueBuckets(relevant, cond.valueOf, 2)),
+    ...judgeCondition(residueBuckets(relevant, cond.valueOf, cond.modulus || 2)),
     reflectionCount: relevant.length,
   }));
 }
@@ -247,6 +264,7 @@ function scanAllAbsences(reflections) {
       '0kl': scanZonalConditions(reflections, '0kl'),
       h0l: scanZonalConditions(reflections, 'h0l'),
       hk0: scanZonalConditions(reflections, 'hk0'),
+      hhl: scanZonalConditions(reflections, 'hhl'),
     },
   };
 }
@@ -294,7 +312,7 @@ function isForbiddenByHeldConditions(scan, h, k, l) {
   for (const [zone, conds] of Object.entries(ZONAL_CONDITIONS)) {
     if (!ZONE_SELECTORS[zone](r)) continue;
     conds.forEach((c, i) => {
-      if (scan.zonal[zone][i].verdict === 'holds' && mod(c.valueOf(r), 2) !== 0) r._forbidden = true;
+      if (scan.zonal[zone] && scan.zonal[zone][i] && scan.zonal[zone][i].verdict === 'holds' && mod(c.valueOf(r), c.modulus || 2) !== 0) r._forbidden = true;
     });
     if (r._forbidden) return true;
   }

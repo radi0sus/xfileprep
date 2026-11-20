@@ -96,6 +96,43 @@ function deriveZonalConditions(operators, zeroIdx) {
   return { periodP, periodQ, periodSum, rawCongruences };
 }
 
+// General form of the zonal conditions, used for matching: the set of index
+// pairs (p, q) — taken mod 12, the grid on which every translation lives —
+// that the space group ALLOWS in a zone. A zone is a plane of reflections
+// spanned by two parameter vectors (e.g. 0kl: p → (0,1,0), q → (0,0,1); the
+// diagonal plane hhl: p → (1,1,0), q → (0,0,1)). An operator constrains the
+// zone if it leaves both vectors unchanged (v·R = v); the constraint is then
+// c_p·p + c_q·q ≡ 0 (mod 12) with c = v·t. The allowed pairs satisfy every
+// constraint — this also covers conditions that combine several operators
+// (e.g. a and b glide together, d-glide plus centering), which the one-by-one
+// period bookkeeping above cannot express.
+function deriveAllowedResidues(operators, paramVectors) {
+  const preserves = (R, v) => [0, 1, 2].every(j => v[0] * R[0][j] + v[1] * R[1][j] + v[2] * R[2][j] === v[j]);
+  const constraints = [];
+  for (const op of operators) {
+    if (!paramVectors.every(v => preserves(op.R, v))) continue;
+    const [cp, cq] = paramVectors.map(v => v[0] * op.t[0] + v[1] * op.t[1] + v[2] * op.t[2]);
+    if (cp % 12 !== 0 || cq % 12 !== 0) constraints.push([cp, cq]);
+  }
+  const allowed = new Set();
+  for (let p = 0; p < 12; p++) {
+    for (let q = 0; q < 12; q++) {
+      if (constraints.every(([cp, cq]) => (((cp * p + cq * q) % 12) + 12) % 12 === 0)) allowed.add(p + ',' + q);
+    }
+  }
+  return allowed;
+}
+
+// Does every allowed pair satisfy  a·p + b·q ≡ 0 (mod m)?  (m divides 12, so
+// working mod 12 is exact.) True = the group predicts this condition to hold.
+function allowedSatisfies(allowed, [a, b, m]) {
+  for (const key of allowed) {
+    const [p, q] = key.split(',').map(Number);
+    if ((((a * p + b * q) % m) + m) % m !== 0) return false;
+  }
+  return true;
+}
+
 // Named centering types for matching the lattice translation vectors
 // straight from the parsed Hall symbol — no need to re-derive this from
 // the operator set, since the Hall symbol already states it explicitly.
@@ -137,6 +174,13 @@ function deriveAllConditions(hallSymbol) {
       '0kl': deriveZonalConditions(operators, [0]),
       h0l: deriveZonalConditions(operators, [1]),
       hk0: deriveZonalConditions(operators, [2]),
+    },
+    // zone → set of allowed (p, q) mod 12; compare with absences.js ZONAL_CONDITIONS[..].test
+    zonalAllowed: {
+      '0kl': deriveAllowedResidues(operators, [[0, 1, 0], [0, 0, 1]]),
+      h0l: deriveAllowedResidues(operators, [[1, 0, 0], [0, 0, 1]]),
+      hk0: deriveAllowedResidues(operators, [[1, 0, 0], [0, 1, 0]]),
+      hhl: deriveAllowedResidues(operators, [[1, 1, 0], [0, 0, 1]]),
     },
   };
 }

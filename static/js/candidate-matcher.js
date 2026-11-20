@@ -197,22 +197,26 @@ function scoreCandidate(hallSymbol, observedScan) {
     }
   }
 
-  for (const zone of ['0kl', 'h0l', 'hk0']) {
-    const zoneNames = { '0kl': ['b-glide (k=2n)', 'c-glide (l=2n)', 'n-glide (k+l=2n)'],
-      h0l: ['a-glide (h=2n)', 'c-glide (l=2n)', 'n-glide (h+l=2n)'],
-      hk0: ['a-glide (h=2n)', 'b-glide (k=2n)', 'n-glide (h+k=2n)'] }[zone];
-    const c = calc.zonal[zone];
-    const expectations = [
-      { name: zoneNames[0], expectHolds: c.periodP === 2 },
-      { name: zoneNames[1], expectHolds: c.periodQ === 2 },
-      { name: zoneNames[2], expectHolds: c.periodSum === 2 },
-    ];
-    for (const exp of expectations) {
-      const observed = observedScan.zonal[zone].find(r => r.name === exp.name);
+  // Zonal glide conditions, including the d-glide (mod 4) and the diagonal zone
+  // hhl. A candidate "expects a condition to hold" if EVERY index pair it
+  // allows in that zone satisfies it (reflection-conditions.js) — so a and b
+  // glides together also imply n, and a d-glide implies n, exactly as the data
+  // will show.
+  for (const zone of ['0kl', 'h0l', 'hk0', 'hhl']) {
+    for (const cond of ZONAL_CONDITIONS[zone]) {
+      const observed = observedScan.zonal[zone] && observedScan.zonal[zone].find(r => r.name === cond.name);
       if (!observed || observed.verdict === 'inconclusive') continue; // no evidence either way
+      const expectHolds = allowedSatisfies(calc.zonalAllowed[zone], cond.test);
+      // The d-glide and diagonal-zone conditions mostly read "violated" and the
+      // candidate (correctly) predicts nothing there. Counting that as a check at
+      // partial credit (violation% / 100) would only drag every candidate's score
+      // down alike, so it is left out; a candidate that predicts such a condition
+      // and doesn't get it, or the data obeying one that the candidate doesn't
+      // predict, still count in full.
+      if ((zone === 'hhl' || cond.modulus === 4) && !expectHolds && observed.verdict === 'violated') continue;
       checks.push({
-        label: `${zone} ${exp.name}`,
-        match: matchFraction(exp.expectHolds, observed.violationPercent),
+        label: `${zone} ${cond.name}`,
+        match: matchFraction(expectHolds, observed.violationPercent),
         weight: weightOf(observed),
       });
     }
