@@ -1077,35 +1077,55 @@
              whichever row is selected, not just the top one.</p>`
           : '';
 
-        // Close runners-up that LOSE on a clear, clean difference — otherwise their
-        // percentages look like a tie (the shared zone checks involve thousands of
-        // reflections, a decisive axial check only dozens). Listed: checks where the
-        // runner-up is clearly wrong (match < 20 %) and the top candidate is clearly right
-        // (or the check only exists for the runner-up), with at least 8 reflections behind it.
-        const runnerUpNotes = results.slice(1, 8)
-          .filter(r => topScore - r.score <= 0.03 && r.score !== topScore)
-          .map(r => {
-            const bad = r.checks.filter(c => c.match < 0.2 && c.weight >= 8).filter(c => {
-              const t = results[0].checks.find(x => x.label === c.label);
-              return !t || t.match > 0.8;
-            });
-            return bad.length ? { r, bad } : null;
-          })
-          .filter(Boolean).slice(0, 5)
-          .map(({ r, bad }) => `<li><strong>${formatHM(r.entry.hm)}</strong> (${(r.score * 100).toFixed(1)}%): ` + bad.map(c => {
-            const stricter = c.label.match(/^(\S+) period (\d+) \(stricter than the predicted (\d+)\)/);
-            return stricter
-              ? `${stricter[1]}: the data obey period ${stricter[2]}, but this candidate only predicts period ${stricter[3]}`
-              : `${c.label}: opposite of what the data show`;
-          }).join('; ') + '</li>');
+        // A check is a CLEAR contradiction if the scan reached a verdict (holds / violated)
+        // and the candidate predicts the opposite. (Not "match < 20 %": a condition judged
+        // "violated" at 67 % scores 0.33 for a candidate that predicts it, yet is clearly wrong.)
+        const contradicts = c => c.verdict && c.expectHolds !== undefined &&
+          ((c.verdict === 'holds' && !c.expectHolds) || (c.verdict === 'violated' && c.expectHolds));
+        const decisiveAgainst = r => r.checks.filter(c => contradicts(c) && c.weight >= 8).filter(c => {
+          const t = results[0].checks.find(x => x.label === c.label);
+          return !t || !contradicts(t);
+        });
+        const describeContradiction = c => {
+          const stricter = c.label.match(/^(\S+) period (\d+) \(stricter than the predicted (\d+)\)/);
+          if (stricter) return `${stricter[1]}: the data obey period ${stricter[2]}, but this candidate only predicts period ${stricter[3]}`;
+          const none = c.label.match(/^(\S+) period 1$/);
+          if (none) return `${none[1]}: the data show absences along this axis (a screw-axis condition), but this candidate predicts none`;
+          return c.expectHolds ? `${c.label}: predicted by this candidate, but the data violate it`
+                               : `${c.label}: the data obey it, but this candidate does not predict it`;
+        };
+
+        // Close runners-up that LOSE on a clear difference — otherwise their percentages
+        // look like a tie (the shared zone checks involve thousands of reflections, a
+        // decisive axial check only dozens).
+        const closeRows = results.slice(1, 8).filter(r => topScore - r.score <= 0.03 && r.score !== topScore);
+        const runnerUpNotes = closeRows
+          .map(r => ({ r, bad: decisiveAgainst(r) })).filter(x => x.bad.length).slice(0, 5)
+          .map(({ r, bad }) => `<li><strong>${formatHM(r.entry.hm)}</strong> (${(r.score * 100).toFixed(1)}%): ${bad.map(describeContradiction).join('; ')}</li>`);
         const runnerUpHtml = runnerUpNotes.length
           ? `<details class="explain" open><summary>Why close runners-up score lower</summary><p><small>The percentages above can look like a tie because the shared checks involve far more reflections than the decisive ones. These rows lose on a clear difference:</small></p><ul>${runnerUpNotes.join('')}</ul></details>`
+          : '';
+
+        // Unresolved: within 1.5 points of the top row and NO clear contradiction separates them
+        // (an exact acentric/centrosymmetric tie is already covered by the E² warning above).
+        const unresolved = results.slice(1, 6).filter(r =>
+          topScore - r.score <= 0.015 &&
+          !(r.score === topScore && hallSymbolIsCentrosymmetric(r.entry.hall) !== topIsCentro) &&
+          decisiveAgainst(r).length === 0);
+        const unresolvedHtml = unresolved.length
+          ? `<p style="color:#b60"><strong>⚠ ${formatHM(results[0].entry.hm)} (${(topScore * 100).toFixed(1)}%) is not clearly separated from
+              ${unresolved.map(r => `${formatHM(r.entry.hm)} (${(r.score * 100).toFixed(1)}%)`).join(', ')}</strong> — no check contradicts the runner-up
+              <small>(within 1.5 points, and none of the differing conditions is clearly held or clearly violated).
+              Typical causes: weak data, pseudo-symmetry (a weak pseudo-centering, a glide plane that is only partly obeyed), a condition this scan does not cover, or an
+              enantiomorphic pair (P 4₁ / P 4₃ …) that absences can never tell apart. Look at the layer viewer (Laue tab) and the zone plots (Absences tab), and treat the top row
+              as a proposal — the refinement (R1, Flack parameter, ADDSYM in PLATON) has the last word.</small></p>`
           : '';
 
         spaceGroupResultEl.innerHTML = `
           <h2>Space group candidates</h2>
           <p><small>Assumed Laue class: ${targetLaueClass} (${laueClassNote})</small></p>
           ${tieWarning}
+          ${unresolvedHtml}
           <table>
             <tr><th>Use</th><th>No.</th><th>H-M symbol</th><th>Hall symbol</th><th>Match</th><th>Setting</th></tr>
             ${rows}

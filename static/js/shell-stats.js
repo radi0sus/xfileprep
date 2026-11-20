@@ -13,10 +13,22 @@
 //   Rpim  = Σ sqrt(1/(n−1)) Σ|I − <I>| / Σ I   (precision of the merged value)
 // <I/σ> is the mean of I/σ over the MERGED reflections, with σ the standard
 // error sqrt(Σσᵢ²)/n — the same σ that mergeReflections() reports.
+// CC½ by the σ–τ method (Assmann, Brehm & Diederichs 2016, J. Appl. Cryst. 49,
+// 1021; as in XDSCC12 and CrystFEL's partialator; see also the XDSwiki page
+// "CC1/2"): with σ²_y = variance of the averaged intensities of the unique
+// reflections of the shell and σ²_ε = mean over the reflections of the
+// variance of their merged intensity (sample variance of the observations,
+// divided by n/2),
+//     CC½ = (σ²_y − ½ σ²_ε) / (σ²_y + ½ σ²_ε).
+// No random split into two halves: the result is deterministic and unbiased,
+// and it can become slightly negative when only noise is left. Unweighted
+// (the σ values of the single observations are not used), only reflections
+// measured at least twice enter.
 
 function accumulateShell(chunk, sLo, sHi, possible, nAllowed = null) {
   let nTotal = 0, sumISig = 0, nISig = 0, nGt2 = 0;
   let numInt = 0, numMeas = 0, numPim = 0, den = 0;
+  const ccLists = []; // intensities of each reflection measured at least twice, for CC½
   for (const { members } of chunk) {
     const n = members.length;
     nTotal += n;
@@ -35,6 +47,7 @@ function accumulateShell(chunk, sLo, sHi, possible, nAllowed = null) {
       numMeas += Math.sqrt(n / (n - 1)) * dev;
       numPim += Math.sqrt(1 / (n - 1)) * dev;
       den += sum;
+      ccLists.push(members.map(r => r.f2));
     }
   }
   const nUnique = chunk.length;
@@ -48,7 +61,30 @@ function accumulateShell(chunk, sLo, sHi, possible, nAllowed = null) {
     rInt: den > 0 ? numInt / den : null,
     rMeas: den > 0 ? numMeas / den : null,
     rPim: den > 0 ? numPim / den : null,
+    cc12: ccLists.length >= 10 ? cc12SigmaTau(ccLists) : null,
+    nCC: ccLists.length,
   };
+}
+
+// σ–τ CC½ from the lists of observations of the unique reflections (each with
+// n ≥ 2 observations). Returns null if it cannot be formed (fewer than two
+// reflections, or a non-positive denominator).
+function cc12SigmaTau(lists) {
+  const N = lists.length;
+  if (N < 2) return null;
+  let sx = 0, sxx = 0, sEps = 0;
+  for (const xs of lists) {
+    const n = xs.length;
+    let sum = 0, sum2 = 0;
+    for (const x of xs) { sum += x; sum2 += x * x; }
+    const xbar = sum / n;
+    sx += xbar; sxx += xbar * xbar;
+    sEps += ((sum2 - sum * sum / n) / (n - 1)) / (n / 2);   // unbiased variance of the mean of the two half-data sets
+  }
+  const sigY2 = (sxx - sx * sx / N) / (N - 1);
+  const sigEps2 = sEps / N;
+  const den = sigY2 + 0.5 * sigEps2;
+  return den > 0 ? (sigY2 - 0.5 * sigEps2) / den : null;
 }
 
 // All symmetry-unique hkl up to sMax that the lattice allows — the denominator
@@ -148,10 +184,12 @@ function renderShellStatistics(container, stats, info) {
     const low = sh.completeness < 0.95;
     return `<td${low ? ' style="color:#b60;font-weight:600;"' : ''} title="${sh.nUnique} of ${sh.possible} possible unique reflections">${(sh.completeness * 100).toFixed(1)} %</td>`;
   };
+  const ccCell = sh => sh.cc12 === null ? '<td>—</td>'
+    : `<td${sh.cc12 < 0.3 ? ' style="color:#b60;font-weight:600;"' : ''} title="${sh.nCC} reflections measured at least twice">${(sh.cc12 * 100).toFixed(1)} %</td>`;
   const row = (label, sh, cls) => `
     <tr${cls ? ` class="${cls}"` : ''}>
       <td>${label}</td><td>${sh.nUnique}</td>${compCell(sh)}<td>${sh.redundancy === null ? '—' : sh.redundancy.toFixed(2)}</td>
-      <td>${num(sh.meanISigma)}</td><td>${pct(sh.fractionGt2)}</td>
+      <td>${num(sh.meanISigma)}</td><td>${pct(sh.fractionGt2)}</td>${ccCell(sh)}
       <td>${pct(sh.rInt)}</td><td>${pct(sh.rMeas)}</td><td>${pct(sh.rPim)}</td>
     </tr>`;
   const dLabel = sh => `${sh.dMax === null ? '∞' : sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å`;
@@ -167,6 +205,11 @@ function renderShellStatistics(container, stats, info) {
   } else {
     cutNote = `<p><small>⟨I/σ⟩ stays above 2 in every shell — no obvious resolution cut-off in this data set. Nothing is cut or written to the .ins/.hkl.</small></p>`;
   }
+  const ccCutIdx = stats.shells.findIndex(sh => sh.cc12 !== null && sh.cc12 < 0.3);
+  if (ccCutIdx >= 0) {
+    cutNote += `<p><small>CC<sub>½</sub> falls below 30 % from the shell ${dLabel(stats.shells[ccCutIdx])} on — there the two halves of the data no longer agree
+      with each other, whatever the σ values say. Many programs use this (about 0.3 – 0.5) rather than ⟨I/σ⟩ ≈ 2 as the resolution criterion. Orange cells in the table: CC<sub>½</sub> &lt; 30 %.</small></p>`;
+  }
   const redNote = stats.overall.rInt === null
     ? `<p style="color:#a60;"><small>⚠ No repeated observations: R values are undefined (data already merged to a unique set).</small></p>` : '';
 
@@ -175,11 +218,12 @@ function renderShellStatistics(container, stats, info) {
       Shells have equal width in d*³ (the same number of possible unique reflections each), from low to high resolution.
       Where the mean intensity approaches zero the R values grow without limit — use ⟨I/σ⟩ there.</small></p>
     <table class="shellTable">
-      <tr><th>d range</th><th>Unique</th><th>Complete</th><th>Redundancy</th><th>⟨I/σ⟩</th><th>I &gt; 2σ</th>
+      <tr><th>d range</th><th>Unique</th><th>Complete</th><th>Redundancy</th><th>⟨I/σ⟩</th><th>I &gt; 2σ</th><th>CC<sub>½</sub></th>
           <th>R<sub>int</sub></th><th>R<sub>meas</sub></th><th>R<sub>pim</sub></th></tr>
       ${rows}${total}
     </table>
     ${redNote}${cutNote}
+    <div id="shellCurvesA"></div><div id="shellCurvesB"></div>
     <details class="shellLegend">
       <summary>What do these columns mean?</summary>
       <ul>
@@ -188,10 +232,110 @@ function renderShellStatistics(container, stats, info) {
         <li><strong>Complete</strong> — measured unique reflections divided by the unique reflections the cell, lattice centering and Laue class allow in that shell (hover for the counts). Below 95 % is shown in orange: gaps in the data (beamstop, detector gaps, short scan). The bottom row is the completeness up to the highest measured resolution. Reflections that the lattice centering forbids, or that the absence scan found to be systematically absent (screw axes, glides), count neither as possible nor as measured — so files already cleaned of absences (deposited CIF/.hkl data) are not penalised. If a systematic absence was NOT recognised by the scan, the value is too low.</li>
         <li><strong>⟨I/σ⟩</strong> — mean signal-to-noise of the merged reflections (intensity divided by its standard uncertainty σ). Higher is better; a common rule of thumb puts the resolution limit where it falls below about 2.</li>
         <li><strong>I &gt; 2σ</strong> — share of merged reflections whose intensity is more than twice its uncertainty ("observed" reflections).</li>
+        <li><strong>CC<sub>½</sub></strong> — how well the data agree with themselves: the variance of the averaged intensities against the variance of their merging error, CC<sub>½</sub> = (σ²<sub>y</sub> − ½σ²<sub>ε</sub>) / (σ²<sub>y</sub> + ½σ²<sub>ε</sub>) (σ–τ method, Assmann et al. 2016, as in XDSCC12 and CrystFEL; no random split). Only reflections measured at least twice. Close to 100 % = reproducible; it falls towards 0 where only noise is left (it can even turn slightly negative). Does not use the σ values. Orange below 30 %.</li>
         <li><strong>R<sub>int</sub></strong> — spread of equivalent measurements around their mean, Σ|I − ⟨I⟩| / ΣI. It grows with redundancy even when the data get better.</li>
         <li><strong>R<sub>meas</sub></strong> — R<sub>int</sub> corrected for redundancy (factor √(n/(n−1))): the quality of a single measurement, comparable between data sets.</li>
         <li><strong>R<sub>pim</sub></strong> — R<sub>int</sub> corrected with √(1/(n−1)): the precision of the merged (averaged) intensities that go into refinement; always smaller than R<sub>meas</sub>.</li>
       </ul>
       <p><small>R values are only defined for reflections measured at least twice, and they diverge where the mean intensity approaches zero — rely on ⟨I/σ⟩ there.</small></p>
     </details>`;
+  renderShellCurves(container, stats);
 }
+
+
+// --- Curves under the table ---------------------------------------------------
+// Plot A (percent scale): completeness, I > 2σ, CC½ and R_meas (clipped at
+// 100 %) against (sin θ/λ)² of the shell. Plot B: ⟨I/σ⟩ on a log axis with the
+// ⟨I/σ⟩ = 2 line. Gaps in a series (R, CC½ undefined) just break the line.
+const SHELL_CURVE_COLORS = { complete: '#2a7bd4', gt2: '#2a9d5c', cc12: '#d9822b', rMeas: '#c0392b', isig: '#2a7bd4' };
+let _lastShellCurves = null;
+
+function renderShellCurves(container, stats) {
+  _lastShellCurves = [container, stats];
+  const a = container.querySelector('#shellCurvesA'), b = container.querySelector('#shellCurvesB');
+  if (!a || !b || !stats.shells || stats.shells.length < 2) return;
+  const clip = x => (x === null ? null : Math.min(100, x * 100));
+  const specA = {
+    caption: '<strong>Shell statistics (percent)</strong>',
+    yMin: 0, yMax: 100, log: false, yLabel: '%',
+    series: [
+      { label: 'completeness', color: SHELL_CURVE_COLORS.complete, vals: sh => clip(sh.completeness) },
+      { label: 'I > 2σ', color: SHELL_CURVE_COLORS.gt2, vals: sh => clip(sh.fractionGt2) },
+      { label: 'CC½', color: SHELL_CURVE_COLORS.cc12, vals: sh => clip(sh.cc12) },
+      { label: 'Rmeas (≤ 100)', color: SHELL_CURVE_COLORS.rMeas, vals: sh => clip(sh.rMeas) },
+    ],
+  };
+  const maxI = Math.max(...stats.shells.map(sh => sh.meanISigma || 0), 4);
+  const specB = {
+    caption: '<strong>⟨I/σ⟩ per shell</strong>',
+    yMin: 0.5, yMax: Math.pow(10, Math.ceil(Math.log10(maxI))), log: true, yLabel: '⟨I/σ⟩',
+    refLine: { y: 2, label: '⟨I/σ⟩ = 2' },
+    series: [{ label: '⟨I/σ⟩', color: SHELL_CURVE_COLORS.isig, vals: sh => (sh.meanISigma === null ? null : Math.max(0.5, sh.meanISigma)) }],
+  };
+  for (const [el, spec] of [[a, specA], [b, specB]]) {
+    const canvas = document.createElement('canvas');
+    el.innerHTML = ''; el.appendChild(canvas);
+    drawShellCurve(canvas, stats, spec);
+    attachPlotZoom(canvas, spec.caption, 480, (cv, zoom) => drawShellCurve(cv, stats, spec, zoom));
+  }
+}
+
+function drawShellCurve(canvas, stats, spec, zoom = 1) {
+  const colors = getPlotColors();
+  const cssW = 480, cssH = 260;
+  const g = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
+  const m = { left: 50, right: 15, top: 14, bottom: 40 };
+  const pw = cssW - m.left - m.right, ph = cssH - m.top - m.bottom;
+  const xs = stats.shells.map(sh => {
+    const sHi = 1 / (2 * sh.dMin), sLo = sh.dMax === null ? 0 : 1 / (2 * sh.dMax);
+    const mid = (sLo + sHi) / 2;
+    return mid * mid;
+  });
+  const xMax = Math.max(...xs) * 1.05;
+  const px = x => m.left + (x / xMax) * pw;
+  const ty = v => (spec.log ? Math.log10(v) : v);
+  const lo = ty(spec.yMin), hi = ty(spec.yMax);
+  const py = v => m.top + ph - ((ty(v) - lo) / (hi - lo)) * ph;
+
+  g.lineWidth = 1; g.strokeStyle = colors.grid; g.fillStyle = colors.text; g.font = '10px sans-serif';
+  const yTicks = spec.log ? [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].filter(v => v >= spec.yMin && v <= spec.yMax) : [0, 20, 40, 60, 80, 100];
+  for (const v of yTicks) {
+    g.beginPath(); g.moveTo(m.left, py(v)); g.lineTo(m.left + pw, py(v)); g.stroke();
+    g.textAlign = 'right'; g.fillText(String(v), m.left - 6, py(v) + 3);
+  }
+  const xStep = xMax > 0.3 ? 0.1 : 0.05;
+  for (let x = 0; x <= xMax; x += xStep) {
+    g.beginPath(); g.moveTo(px(x), m.top); g.lineTo(px(x), m.top + ph); g.stroke();
+    g.textAlign = 'center'; g.fillText(x.toFixed(2), px(x), cssH - m.bottom + 14);
+  }
+  if (spec.refLine) {
+    g.strokeStyle = colors.axis; g.setLineDash([5, 3]);
+    g.beginPath(); g.moveTo(m.left, py(spec.refLine.y)); g.lineTo(m.left + pw, py(spec.refLine.y)); g.stroke(); g.setLineDash([]);
+    g.fillStyle = colors.text; g.textAlign = 'right'; g.fillText(spec.refLine.label, m.left + pw - 4, py(spec.refLine.y) - 4);
+  }
+  for (const ser of spec.series) {
+    g.strokeStyle = ser.color; g.fillStyle = ser.color; g.lineWidth = 1.8;
+    let pen = false;
+    stats.shells.forEach((sh, i) => {
+      const v = ser.vals(sh);
+      if (v === null) { pen = false; return; }
+      if (!pen) { g.beginPath(); g.moveTo(px(xs[i]), py(v)); pen = true; } else { g.lineTo(px(xs[i]), py(v)); }
+      g.stroke();
+      g.beginPath(); g.arc(px(xs[i]), py(v), 3, 0, 2 * Math.PI); g.fill();
+      g.beginPath(); g.moveTo(px(xs[i]), py(v));
+    });
+  }
+  if (spec.series.length > 1) {   // legend, bottom left
+    g.font = '10px sans-serif'; g.textAlign = 'left';
+    spec.series.forEach((ser, i) => {
+      const y = m.top + ph - 8 - (spec.series.length - 1 - i) * 13;
+      g.fillStyle = ser.color; g.fillRect(m.left + 8, y - 7, 14, 3);
+      g.fillStyle = colors.text; g.fillText(ser.label, m.left + 28, y - 2);
+    });
+  }
+  g.fillStyle = colors.text; g.font = '11px sans-serif'; g.textAlign = 'center';
+  g.fillText('(sin θ/λ)² (Å⁻²), shell mid', m.left + pw / 2, cssH - 6);
+  g.save(); g.translate(12, m.top + ph / 2); g.rotate(-Math.PI / 2); g.fillText(spec.yLabel, 0, 0); g.restore();
+}
+
+onPlotThemeChange(() => { if (_lastShellCurves) renderShellCurves(..._lastShellCurves); });

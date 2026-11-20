@@ -176,6 +176,7 @@ function scoreCandidate(hallSymbol, observedScan) {
     checks.push({
       label: `${axis} period ${calcPeriod}`,
       match: matchFraction(calcPeriod !== 1, reference.violationPercent),
+      expectHolds: calcPeriod !== 1, verdict: reference.verdict, // kept for the UI: clear contradictions between candidates
       weight: reference.reflectionCount, // every period partitions the SAME reflection set on this axis, so the weight is period-independent
     });
 
@@ -191,6 +192,7 @@ function scoreCandidate(hallSymbol, observedScan) {
         checks.push({
           label: `${axis} period ${stricter.period} (stricter than the predicted ${calcPeriod})`,
           match: matchFraction(false, stricter.violationPercent),
+          expectHolds: false, verdict: stricter.verdict,
           weight: stricter.reflectionCount,
         });
       }
@@ -217,6 +219,7 @@ function scoreCandidate(hallSymbol, observedScan) {
       checks.push({
         label: `${zone} ${cond.name}`,
         match: matchFraction(expectHolds, observed.violationPercent),
+        expectHolds, verdict: observed.verdict,
         weight: weightOf(observed),
       });
     }
