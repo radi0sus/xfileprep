@@ -24,6 +24,7 @@ function getPlotColors() {
     text: '#c7cbd3',
     fitLine: '#ff8a80',
     point: 'rgba(157, 181, 255, 0.8)',
+    symFilled: 'rgba(255, 170, 80, 0.75)', // Laue plots: position filled in from a symmetry equivalent (dark)
   } : {
     bg: '#ffffff',
     present: '#0a8a3c',
@@ -33,6 +34,7 @@ function getPlotColors() {
     text: '#555',
     fitLine: '#c33',
     point: 'rgba(20,90,180,0.75)',
+    symFilled: 'rgba(225, 120, 10, 0.7)', // Laue plots: position filled in from a symmetry equivalent
   };
 }
 

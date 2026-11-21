@@ -165,8 +165,20 @@
       if (!lastReflections) return;
       document.getElementById('laueVizSection').style.display = 'block';
       document.getElementById('laueVizEmpty').style.display = 'none';
+      // Laue group for the optional "fill in symmetry equivalents" display
+      // (same class and unique axis as the layer viewer and the shell table).
+      const cellForGroup = readCellOrNull();
+      let laueGroup = null, laueForFill = determinedLaueClass;
+      try {
+        if (cellForGroup) {
+          const classification = classifyCellMetric(cellForGroup);
+          const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
+          laueForFill = determinedLaueClass || classification.laueClasses[0];
+          laueGroup = generateGroup(getLaueClassGenerators(laueForFill, monoclinicAxis));
+        }
+      } catch (err) { laueGroup = null; }
       renderLaueOverview(document.getElementById('laueVizContainer'), document.getElementById('laueVizNote'),
-        lastReflections, readCellOrNull(), determinedLaueClass, determinedLaueClassSource);
+        lastReflections, cellForGroup, determinedLaueClass, determinedLaueClassSource, laueGroup);
       renderShellStats();
       renderLayerViewer();
     }

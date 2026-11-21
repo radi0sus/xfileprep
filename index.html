@@ -82,7 +82,9 @@
           <option value="area" selected>area ∝ I (diameter ∝ √I)</option>
           <option value="linear">diameter ∝ I</option>
           <option value="log">logarithmic</option>
-        </select></label></p>
+        </select></label>
+        <label style="margin-left:1em" title="For merged data (one reflection per symmetry class): positions that were not measured themselves get the mean intensity of their measured symmetry equivalents under the Laue class, drawn in orange. Measured positions are never changed. Off by default, because the plain picture is the one that shows the measured symmetry.">
+          <input type="checkbox" id="laueFillSym"> fill in symmetry equivalents (Laue class) <span class="symFilledKey">●</span></label></p>
       <div id="laueVizNote"></div>
       <div id="laueVizContainer" class="laueGrid"></div>
 

@@ -24,7 +24,20 @@ const LAYER_AXES = {
   h: { name: 'Hkl', fixed: 'h', u: 'k', v: 'l', uIdx: 1, vIdx: 2, layerOf: r => r.h, uOf: r => r.k, vOf: r => r.l, hkl: (u, v, n) => [n, u, v] },
 };
 
-const _layer = { ctx: null, data: null, axis: 'l', n: 0, showGaps: true, timer: null, canvas: null, els: null };
+const _layer = { ctx: null, data: null, dataMeasured: null, dataFilled: null, axis: 'l', n: 0, showGaps: true, timer: null, canvas: null, els: null };
+
+// Optional fill-in (shared checkbox "fill in symmetry equivalents", laue-viz.js):
+// the layer data are then built from measured + generated reflections. The
+// gaps don't change (they are computed from symmetry classes either way) and
+// the intensity scale stays the measured one.
+function currentLayerData() {
+  if (!laueFillSymmetryEnabled()) return _layer.dataMeasured;
+  if (!_layer.dataFilled) {
+    const generated = symmetryFilledReflections(_layer.ctx.reflections, _layer.ctx.group);
+    _layer.dataFilled = prepareLayerData({ ..._layer.ctx, reflections: _layer.ctx.reflections.concat(generated) });
+  }
+  return _layer.dataFilled;
+}
 
 // Everything that does not depend on the current layer, computed once.
 function prepareLayerData(ctx) {
@@ -35,11 +48,13 @@ function prepareLayerData(ctx) {
   const axes = {};
   for (const key of Object.keys(LAYER_AXES)) axes[key] = { buckets: new Map(), nMin: Infinity, nMax: -Infinity, uMin: Infinity, uMax: -Infinity, vMin: Infinity, vMax: -Infinity };
   for (const r of ctx.reflections) {
-    const c = canonicalHKL(r.h, r.k, r.l, ctx.group);
-    classes.add(c[0] + ',' + c[1] + ',' + c[2]);
-    const s = sinThetaOverLambda(r.h, r.k, r.l, recip);
-    if (s > sMax) sMax = s;
-    if (r.f2 > 0) pos.push(r.f2);
+    if (!r.generated) { // filled-in positions change neither the gaps, the resolution limit nor the scale
+      const c = canonicalHKL(r.h, r.k, r.l, ctx.group);
+      classes.add(c[0] + ',' + c[1] + ',' + c[2]);
+      const s = sinThetaOverLambda(r.h, r.k, r.l, recip);
+      if (s > sMax) sMax = s;
+      if (r.f2 > 0) pos.push(r.f2);
+    }
     for (const [key, cfg] of Object.entries(LAYER_AXES)) {
       const a = axes[key], n = cfg.layerOf(r), u = cfg.uOf(r), v = cfg.vOf(r);
       let b = a.buckets.get(n);
@@ -63,10 +78,10 @@ function computeLayerInfo(ctx, data, axisKey, n) {
   for (const r of bucket) {
     const u = cfg.uOf(r), v = cfg.vOf(r), id = u + ',' + v;
     let e = map.get(id);
-    if (!e) { e = { u, v, sum: 0, n: 0 }; map.set(id, e); }
+    if (!e) { e = { u, v, sum: 0, n: 0, generated: !!r.generated }; map.set(id, e); }
     e.sum += r.f2; e.n++;
   }
-  const points = [...map.values()].map(e => ({ u: e.u, v: e.v, I: e.sum / e.n }));
+  const points = [...map.values()].map(e => ({ u: e.u, v: e.v, I: e.sum / e.n, generated: e.generated }));
   const gaps = [];
   let possible = 0;
   const lim = data.sMax + 1e-9;
@@ -108,8 +123,8 @@ function drawLayer(canvas, zoom = 1) {
       g.beginPath(); g.arc(frame.px(p.u, p.v), frame.py(p.u, p.v), Math.max(2.5, rmax * 0.6), 0, 2 * Math.PI); g.stroke();
     }
   }
-  g.fillStyle = colors.point;
   for (const p of info.points) {
+    g.fillStyle = p.generated ? colors.symFilled : colors.point;
     const x = frame.px(p.u, p.v), y = frame.py(p.u, p.v);
     const rad = laueRadius(p.I, data.Iref, rmax, mode);
     g.beginPath(); g.arc(x, y, rad > 0 ? rad : 1.2, 0, 2 * Math.PI); g.fill();
@@ -125,11 +140,12 @@ function refreshLayer() {
   const { els, axis, n } = _layer;
   const cfg = LAYER_AXES[axis];
   els.label.textContent = `${cfg.fixed} = ${n}`;
-  const total = info.points.length;
+  const total = info.points.filter(p => !p.generated).length;
+  const filled = info.points.length - total;
   const complete = info.possible ? Math.min(100, (100 * (info.possible - info.gaps.length)) / info.possible) : null;
   els.status.innerHTML = total === 0 && info.gaps.length === 0
     ? '<small>No reflections in this layer.</small>'
-    : `<small>${total} positions measured · ${info.gaps.length} gap${info.gaps.length === 1 ? '' : 's'} (red rings)` +
+    : `<small>${total} positions measured${filled ? ` · <span class="symFilledKey">${filled} filled in by symmetry</span>` : ''} · ${info.gaps.length} gap${info.gaps.length === 1 ? '' : 's'} (red rings)` +
       `${complete === null ? '' : ` · ${complete.toFixed(1)} % of the ${info.possible} possible unique-reflection positions in this layer covered (symmetry equivalents count)`}</small>`;
 }
 
@@ -149,7 +165,9 @@ function setLayerAxis(axis) {
 function initLayerViewer(container, ctx) {
   stopLayerPlay();
   _layer.ctx = ctx;
-  _layer.data = prepareLayerData(ctx);
+  _layer.dataMeasured = prepareLayerData(ctx);
+  _layer.dataFilled = null;
+  _layer.data = currentLayerData();
   container.innerHTML = `
     <p class="layerControls">
       <label>Layers:
@@ -199,5 +217,17 @@ function initLayerViewer(container, ctx) {
 (function () {
   const sel = document.getElementById('laueScaleSelect');
   if (sel) sel.addEventListener('change', refreshLayer);
+  const fill = document.getElementById('laueFillSym');
+  if (fill) fill.addEventListener('change', () => {
+    if (!_layer.ctx || !_layer.els) return;
+    _layer.data = currentLayerData();
+    // the layer range can grow (e.g. negative h layers that exist only by symmetry); keep the current layer
+    const keep = _layer.n;
+    setLayerAxis(_layer.axis);
+    const a = _layer.data.axes[_layer.axis];
+    _layer.n = Math.max(a.nMin, Math.min(a.nMax, keep));
+    _layer.els.slider.value = _layer.n;
+    refreshLayer();
+  });
 })();
 onPlotThemeChange(refreshLayer);

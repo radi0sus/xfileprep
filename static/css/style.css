@@ -337,3 +337,7 @@ details.explain > p { margin: 0.3rem 0; }
 
 .layerControls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.7rem; margin: 0.4rem 0; }
 #layerCanvas { cursor: zoom-in; }
+
+/* Laue plots: key for positions filled in from symmetry equivalents */
+.symFilledKey { color: rgb(225, 120, 10); }
+@media (prefers-color-scheme: dark) { .symFilledKey { color: rgb(255, 170, 80); } }
