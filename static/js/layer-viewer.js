@@ -16,7 +16,8 @@
 // Context from app.js: { reflections, cell, group, latticeTest, scan, laue, assumed }.
 // Needs: reciprocalPlaneBasis/makeLatticeFrame/drawLatticeGrid (recip-geometry.js),
 // canonicalHKL (laue-merge.js), isForbiddenByHeldConditions (absences.js),
-// sinThetaOverLambda (d-spacing.js), laueRadius (laue-viz.js).
+// sinThetaOverLambda (d-spacing.js), laueRadius (laue-viz.js),
+// getReflectionMarks / reflectionInfoHtml / showReflectionTip (reflection-marks.js).
 
 const LAYER_AXES = {
   l: { name: 'hkL', fixed: 'l', u: 'h', v: 'k', uIdx: 0, vIdx: 1, layerOf: r => r.l, uOf: r => r.h, vOf: r => r.k, hkl: (u, v, n) => [u, v, n] },
@@ -24,7 +25,19 @@ const LAYER_AXES = {
   h: { name: 'Hkl', fixed: 'h', u: 'k', v: 'l', uIdx: 1, vIdx: 2, layerOf: r => r.h, uOf: r => r.k, vOf: r => r.l, hkl: (u, v, n) => [n, u, v] },
 };
 
-const _layer = { ctx: null, data: null, dataMeasured: null, dataFilled: null, axis: 'l', n: 0, showGaps: true, timer: null, canvas: null, els: null };
+const _layer = {
+  ctx: null, data: null, dataMeasured: null, dataFilled: null, axis: 'l', n: 0, timer: null, canvas: null, els: null,
+  showGaps: false, // kept in sync with mark.gaps (older name, also read by laue-3d.js)
+  zoom: 1,         // >1 while the 2D layer is shown enlarged (view-modal.js)
+  mark: { gaps: false, outliers: false, forbidden: false, threshold: REFL_MARK_DEFAULT_THRESHOLD },
+  hit: [],        // CSS-pixel positions of the drawn points/gaps, for hover and click
+};
+
+// Outlier / forbidden marks (reflection-marks.js), or null while both are off.
+function currentLayerMarks() {
+  const m = _layer.mark;
+  return (m.outliers || m.forbidden) && _layer.ctx ? getReflectionMarks(_layer.ctx, m.threshold) : null;
+}
 
 // Optional fill-in (shared checkbox "fill in symmetry equivalents", laue-viz.js):
 // the layer data are then built from measured + generated reflections. The
@@ -107,6 +120,7 @@ function drawLayer(canvas, zoom = 1) {
   const cssW = 420, cssH = 420;
   const g = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
   if (zoom === 1) { canvas.style.width = '100%'; canvas.style.maxWidth = cssW + 'px'; canvas.style.height = 'auto'; }
+  else canvas.style.maxWidth = 'none';
   const info = computeLayerInfo(ctx, data, axis, n);
   const r = { uMin: a.uMin - 1, uMax: a.uMax + 1, vMin: a.vMin - 1, vMax: a.vMax + 1 };
   const basis = reciprocalPlaneBasis(ctx.cell, cfg.uIdx, cfg.vIdx);
@@ -117,10 +131,14 @@ function drawLayer(canvas, zoom = 1) {
   const mode = modeEl ? modeEl.value : 'area';
   const rmax = Math.max(2, frame.spacing * 0.5);
 
+  const hit = [];
+  const gapR = Math.max(2.5, rmax * 0.6);
   if (showGaps) {
-    g.strokeStyle = '#d33'; g.lineWidth = 1.4;
+    g.strokeStyle = colors.gap; g.lineWidth = 1.4;
     for (const p of info.gaps) {
-      g.beginPath(); g.arc(frame.px(p.u, p.v), frame.py(p.u, p.v), Math.max(2.5, rmax * 0.6), 0, 2 * Math.PI); g.stroke();
+      const x = frame.px(p.u, p.v), y = frame.py(p.u, p.v);
+      g.beginPath(); g.arc(x, y, gapR, 0, 2 * Math.PI); g.stroke();
+      hit.push({ x, y, r: gapR, u: p.u, v: p.v, kind: 'gap' });
     }
   }
   for (const p of info.points) {
@@ -128,7 +146,31 @@ function drawLayer(canvas, zoom = 1) {
     const x = frame.px(p.u, p.v), y = frame.py(p.u, p.v);
     const rad = laueRadius(p.I, data.Iref, rmax, mode);
     g.beginPath(); g.arc(x, y, rad > 0 ? rad : 1.2, 0, 2 * Math.PI); g.fill();
+    hit.push({ x, y, r: rad > 0 ? rad : 1.2, u: p.u, v: p.v, kind: p.generated ? 'generated' : 'measured' });
   }
+  // marks on top: violet ring = outlier, cross = forbidden but observed
+  const marks = currentLayerMarks();
+  info.outliers = 0; info.forbidden = 0;
+  if (marks) {
+    for (const p of info.points) {
+      if (p.generated) continue;
+      const [h, k, l] = cfg.hkl(p.u, p.v, n), key = reflKey(h, k, l);
+      const x = frame.px(p.u, p.v), y = frame.py(p.u, p.v);
+      const rad = Math.max(1.2, laueRadius(p.I, data.Iref, rmax, mode));
+      if (_layer.mark.outliers && marks.outliers.has(key)) {
+        info.outliers++;
+        g.strokeStyle = colors.outlier; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, Math.max(rad + 2.5, 4.5), 0, 2 * Math.PI); g.stroke();
+      }
+      if (_layer.mark.forbidden && marks.forbidden.has(key)) {
+        info.forbidden++;
+        const c = Math.max(rad + 1.5, 4);
+        g.strokeStyle = colors.forbidden; g.lineWidth = 1.8;
+        g.beginPath(); g.moveTo(x - c, y - c); g.lineTo(x + c, y + c); g.moveTo(x - c, y + c); g.lineTo(x + c, y - c); g.stroke();
+      }
+    }
+  }
+  if (canvas === _layer.canvas) _layer.hit = hit;
   g.fillStyle = colors.text; g.font = '13px sans-serif'; g.textAlign = 'right';
   g.fillText(`${cfg.fixed} = ${n}`, cssW - 8, 20);
   return info;
@@ -136,7 +178,7 @@ function drawLayer(canvas, zoom = 1) {
 
 function refreshLayer() {
   if (!_layer.canvas) return;
-  const info = drawLayer(_layer.canvas);
+  const info = drawLayer(_layer.canvas, _layer.zoom);
   const { els, axis, n } = _layer;
   const cfg = LAYER_AXES[axis];
   els.label.textContent = `${cfg.fixed} = ${n}`;
@@ -145,9 +187,12 @@ function refreshLayer() {
   const complete = info.possible ? Math.min(100, (100 * (info.possible - info.gaps.length)) / info.possible) : null;
   els.status.innerHTML = total === 0 && info.gaps.length === 0
     ? '<small>No reflections in this layer.</small>'
-    : `<small>${total} positions measured${filled ? ` · <span class="symFilledKey">${filled} filled in by symmetry</span>` : ''} · ${info.gaps.length} gap${info.gaps.length === 1 ? '' : 's'} (red rings)` +
+    : `<small>${total} positions measured${filled ? ` · <span class="symFilledKey">${filled} filled in by symmetry</span>` : ''}` +
+      `${_layer.showGaps ? ` · <span class="reflMarkGap">${info.gaps.length} gap${info.gaps.length === 1 ? '' : 's'}</span>` : ''}` +
+      `${_layer.mark.outliers ? ` · <span class="reflMarkOutlier">${info.outliers} outlier${info.outliers === 1 ? '' : 's'}</span>` : ''}` +
+      `${_layer.mark.forbidden ? ` · <span class="reflMarkForbidden">${info.forbidden} forbidden but observed</span>` : ''}` +
       `${complete === null ? '' : ` · ${complete.toFixed(1)} % of the ${info.possible} possible unique-reflection positions in this layer covered (symmetry equivalents count)`}</small>`;
-  if (typeof laue3dSync === 'function') laue3dSync({ axis, n, data: _layer.data, showGaps: _layer.showGaps }); // laue-3d.js
+  if (typeof laue3dSync === 'function') laue3dSync({ axis, n, data: _layer.data, showGaps: _layer.showGaps, mark: _layer.mark, marks: currentLayerMarks() }); // laue-3d.js
 }
 
 function stopLayerPlay() {
@@ -163,35 +208,105 @@ function setLayerAxis(axis) {
   sl.min = a.nMin; sl.max = a.nMax; sl.value = _layer.n;
 }
 
+// Enlarged 2D layer with the controls above it (view-modal.js). The plot is
+// re-rendered at the larger size, not stretched.
+function openLayerModal(container) {
+  const main = container.querySelector('.layerView2d'), btn = container.querySelector('#layerExpand');
+  openViewModal({
+    title: 'Layer viewer · 2D',
+    top: [container.querySelector('.layerControls')],
+    body: [main],
+    onResize: () => { _layer.zoom = viewModalSquareSize(0) / 420; refreshLayer(); },
+    onClose: () => {
+      _layer.zoom = 1; refreshLayer();
+      btn.textContent = '⤢'; btn.title = 'enlarge the 2D layer (with its controls)';
+    },
+  });
+  btn.textContent = '⤡'; btn.title = 'back to the page';
+}
+
+// Hover shows the info of the nearest drawn point/gap; a click on one pins it.
+function layerHitAt(canvas, clientX, clientY) {
+  const b = canvas.getBoundingClientRect();
+  if (!b.width) return null;
+  const sc = 420 / b.width; // drawing coordinates are CSS pixels of a 420-wide plot
+  const x = (clientX - b.left) * sc, y = (clientY - b.top) * sc;
+  let best = null, bestD = Infinity;
+  for (const p of _layer.hit) {
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d <= Math.max(p.r + 2, 6) && d < bestD) { best = p; bestD = d; }
+  }
+  if (!best) return null;
+  const [h, k, l] = LAYER_AXES[_layer.axis].hkl(best.u, best.v, _layer.n);
+  return { h, k, l, kind: best.kind };
+}
+
+function attachLayerHover(canvas) {
+  canvas.addEventListener('mousemove', e => {
+    const it = layerHitAt(canvas, e.clientX, e.clientY);
+    if (it) showReflectionTip(reflectionInfoHtml(_layer.ctx, it, currentLayerMarks()), e.clientX, e.clientY, false);
+    else hideReflectionTip(false);
+    canvas.style.cursor = it ? 'pointer' : '';
+  });
+  canvas.addEventListener('mouseleave', () => hideReflectionTip(false));
+  canvas.addEventListener('click', e => {
+    const it = layerHitAt(canvas, e.clientX, e.clientY);
+    if (!it) return;
+    showReflectionTip(reflectionInfoHtml(_layer.ctx, it, currentLayerMarks()), e.clientX, e.clientY, true);
+  });
+}
+
 function initLayerViewer(container, ctx) {
   stopLayerPlay();
+  if (typeof closeViewModal === 'function') closeViewModal(); // new data while enlarged: back to the page
+  _layer.zoom = 1;
   _layer.ctx = ctx;
   _layer.dataMeasured = prepareLayerData(ctx);
   _layer.dataFilled = null;
   _layer.data = currentLayerData();
   container.innerHTML = `
-    <p class="layerControls">
-      <label>Layers:
-        <select id="layerAxisSel">
+    <div class="layerControls">
+      <span class="ctlTitle">Layers</span>
+      <div class="ctlRow">
+        <select id="layerAxisSel" title="which index is fixed per layer">
           <option value="l">hk<i>L</i> (l fixed)</option>
           <option value="k">h<i>K</i>l (k fixed)</option>
           <option value="h"><i>H</i>kl (h fixed)</option>
-        </select></label>
-      <button type="button" id="layerPrev" title="previous layer">◀</button>
-      <input type="range" id="layerSlider" step="1" style="vertical-align:middle;width:min(260px,40vw);">
-      <button type="button" id="layerNext" title="next layer">▶</button>
-      <button type="button" id="layerPlay">▶ Play</button>
-      <strong id="layerLabel"></strong>
-      <label><input type="checkbox" id="layerGaps" checked> mark gaps</label>
-    </p>
+        </select>
+        <span class="ctlGroup">
+          <button type="button" id="layerPrev" title="previous layer">◀</button>
+          <input type="range" id="layerSlider" step="1">
+          <button type="button" id="layerNext" title="next layer">▶</button>
+        </span>
+        <button type="button" id="layerPlay">▶ Play</button>
+        <strong id="layerLabel" class="layerLabel"></strong>
+      </div>
+      <span class="ctlTitle">Mark</span>
+      <div class="ctlRow layerMarks">
+        <label title="positions allowed by the lattice, inside the resolution range, with neither the reflection nor any symmetry equivalent measured"><input type="checkbox" id="layerGaps"><span class="reflMarkGap">○</span>&nbsp;gaps</label>
+        <span class="ctlGroup">
+          <label id="layerOutlLabel" title="an observation that disagrees with the other observations of its symmetry class: |I − ⟨I⟩| / σ above the threshold"><input type="checkbox" id="layerOutl"><span class="reflMarkOutlier">◎</span>&nbsp;outliers</label>
+          <select id="layerOutlThr" title="outlier threshold |I − ⟨I⟩| / σ">${REFL_MARK_THRESHOLDS.map(t => `<option value="${t}">&gt; ${t}σ</option>`).join('')}</select>
+        </span>
+        <label title="systematically absent under the observed lattice / absence conditions, yet I/σ ≥ 3"><input type="checkbox" id="layerForb"><span class="reflMarkForbidden">✕</span>&nbsp;forbidden but observed</label>
+      </div>
+    </div>
     <div class="layerViews">
-      <div class="layerView2d"><canvas id="layerCanvas"></canvas><div id="layerStatus"></div></div>
+      <div class="layerView2d">
+        <div class="viewHead"><span class="ctlTitle">2D · current layer</span>
+          <button type="button" class="viewExpand" id="layerExpand" title="enlarge the 2D layer (with its controls)" aria-label="Enlarge 2D layer">⤢</button></div>
+        <div class="layer2dWrap"><canvas id="layerCanvas"></canvas></div>
+        <div id="layerStatus"></div>
+      </div>
       <div class="layerView3d" id="layer3dHost"></div>
     </div>`;
   const q = id => container.querySelector('#' + id);
   _layer.els = { slider: q('layerSlider'), label: q('layerLabel'), status: q('layerStatus'), play: q('layerPlay') };
   _layer.canvas = q('layerCanvas');
-  _layer.showGaps = true;
+  const mk = _layer.mark;
+  q('layerGaps').checked = mk.gaps; q('layerOutl').checked = mk.outliers; q('layerForb').checked = mk.forbidden;
+  q('layerOutlThr').value = String(mk.threshold);
+  _layer.showGaps = mk.gaps;
   setLayerAxis(_layer.axis in LAYER_AXES ? _layer.axis : 'l');
   q('layerAxisSel').value = _layer.axis;
 
@@ -212,8 +327,18 @@ function initLayerViewer(container, ctx) {
     _layer.els.play.textContent = '⏸ Pause';
     _layer.timer = setInterval(() => step(1), 450);
   });
-  q('layerGaps').addEventListener('change', e => { _layer.showGaps = e.target.checked; refreshLayer(); });
-  attachPlotZoom(_layer.canvas, `<strong>Layer viewer</strong>`, 420, (cv, zoom) => drawLayer(cv, zoom));
+  q('layerGaps').addEventListener('change', e => { mk.gaps = _layer.showGaps = e.target.checked; refreshLayer(); });
+  q('layerOutl').addEventListener('change', e => { mk.outliers = e.target.checked; refreshLayer(); });
+  q('layerOutlThr').addEventListener('change', e => { mk.threshold = parseFloat(e.target.value); refreshLayer(); });
+  q('layerForb').addEventListener('change', e => { mk.forbidden = e.target.checked; refreshLayer(); });
+  // outliers need several observations per symmetry class
+  if (!getReflectionMarks(ctx, mk.threshold).unmerged) {
+    mk.outliers = false; q('layerOutl').checked = false; q('layerOutl').disabled = true; q('layerOutlThr').disabled = true;
+    q('layerOutlLabel').title = 'needs unmerged data (several observations per symmetry class); this file has one per class';
+    q('layerOutlLabel').classList.add('disabled');
+  }
+  attachLayerHover(_layer.canvas);
+  q('layerExpand').addEventListener('click', () => (viewModalIsOpen() ? closeViewModal() : openLayerModal(container)));
   if (typeof initLaue3d === 'function') initLaue3d(q('layer3dHost'), ctx); // laue-3d.js (optional)
   refreshLayer();
 }

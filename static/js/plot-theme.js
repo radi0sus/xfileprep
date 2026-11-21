@@ -25,6 +25,9 @@ function getPlotColors() {
     fitLine: '#ff8a80',
     point: 'rgba(157, 181, 255, 0.8)',
     symFilled: 'rgba(255, 170, 80, 0.75)', // Laue plots: position filled in from a symmetry equivalent (dark)
+    gap: '#ff5c5c',       // layer viewer: gap ring (dark)
+    outlier: '#c98bff',   // layer viewer: outlier ring (dark)
+    forbidden: '#f2f3f5', // layer viewer: forbidden-but-observed cross (dark)
   } : {
     bg: '#ffffff',
     present: '#0a8a3c',
@@ -35,6 +38,9 @@ function getPlotColors() {
     fitLine: '#c33',
     point: 'rgba(20,90,180,0.75)',
     symFilled: 'rgba(225, 120, 10, 0.7)', // Laue plots: position filled in from a symmetry equivalent
+    gap: '#dd3333',       // layer viewer: gap ring
+    outlier: '#9b3fd6',   // layer viewer: outlier ring
+    forbidden: '#1a1d23', // layer viewer: forbidden-but-observed cross
   };
 }
 

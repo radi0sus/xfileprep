@@ -20,7 +20,8 @@
 // is (re)built, laue3dSync(state) after every layer redraw.
 // Needs: laueRadius, laueFillSymmetryEnabled, symmetryFilledReflections
 // (laue-viz.js), canonicalHKL (laue-merge.js), isForbiddenByHeldConditions
-// (absences.js), sinThetaOverLambda (d-spacing.js), getPlotColors /
+// (absences.js), sinThetaOverLambda (d-spacing.js), reflectionInfoHtml /
+// showReflectionTip (reflection-marks.js), getPlotColors /
 // onPlotThemeChange (plot-theme.js), LAYER_AXES (layer-viewer.js).
 
 const L3D_AXIS_COLORS = { h: '#c0504d', k: '#4f9a3a', l: '#3b6fc4' }; // a*/0kl, b*/h0l, c*/hk0
@@ -34,10 +35,10 @@ const _l3d = {
   canvas: null, overlay: null, gl: null, prog: null, host: null, els: null, ro: null,
   ctx: null, state: null,
   basis: null, R: 1,               // reciprocal basis (Cartesian, 1/Å), sphere radius
-  pointBuf: null, nPoints: 0, builtFor: null, builtMode: null, builtFill: null,
+  pointBuf: null, nPoints: 0, builtFor: null, builtMode: null, builtFill: null, builtMarks: null, cpu: null, counts: null,
   gapsFor: null, gaps: null,
   lineBuf: null,
-  rot: null, zoom: 1, others: 0.2, size: 0.5,
+  rot: null, zoom: 1, others: 0.2, marksOthers: 0.9, size: 0.5, // opacity of the other layers' points / marks
   show: { sphere: true, h: false, k: false, l: false },
   frame: 0, failed: false,
 };
@@ -110,14 +111,17 @@ function l3dViewOblique() {
 // ---------- data ----------
 
 // One vertex per unique hkl (mean over exact repeats, like the 2D plots),
-// plus the gaps. Layout per vertex: pos(3) hkl(3) radius(1) kind(1).
+// plus the gaps and the outlier / forbidden marks (reflection-marks.js).
+// Layout per vertex: pos(3) hkl(3) radius(1) kind(1);
+// kind 0 measured, 1 filled in by symmetry, 2 gap, 3 outlier ring, 4 forbidden cross.
 function l3dBuildPoints() {
   const { ctx, state } = _l3d;
   const data = state.data;
   const modeEl = document.getElementById('laueScaleSelect');
   const mode = modeEl ? modeEl.value : 'area';
   const fill = typeof laueFillSymmetryEnabled === 'function' && laueFillSymmetryEnabled();
-  if (_l3d.builtFor === data && _l3d.builtMode === mode && _l3d.builtFill === fill && _l3d.gapsFor === (state.showGaps ? data : null)) return;
+  const marks = state.marks || null;
+  if (_l3d.builtFor === data && _l3d.builtMode === mode && _l3d.builtFill === fill && _l3d.gapsFor === (state.showGaps ? data : null) && _l3d.builtMarks === marks) return;
 
   let refl = ctx.reflections;
   if (fill) refl = refl.concat(symmetryFilledReflections(ctx.reflections, ctx.group));
@@ -131,7 +135,8 @@ function l3dBuildPoints() {
   const b = _l3d.basis;
   const rmax = 0.5 * Math.min(l3dLen(b.A), l3dLen(b.B), l3dLen(b.C));
   const gaps = state.showGaps ? l3dGaps(data) : [];
-  const n = map.size + gaps.length;
+  const nMarks = marks ? marks.outliers.size + marks.forbidden.size : 0;
+  const n = map.size + gaps.length + nMarks;
   const arr = new Float32Array(n * 8);
   let i = 0;
   const put = (h, k, l, rad, kind) => {
@@ -146,15 +151,34 @@ function l3dBuildPoints() {
   // minimum pixel size by the shader).
   const frac = I => (I > 0 ? laueRadius(I, data.Iref, 1000, mode) / 1000 : 0);
   for (const e of map.values()) put(e.h, e.k, e.l, rmax * frac(e.sum / e.n), e.generated ? 1 : 0);
+  // marks last, so they are drawn on top of their points
+  if (marks) {
+    const radAt = key => { const e = map.get(key); return e ? rmax * frac(e.sum / e.n) : 0; };
+    for (const key of marks.outliers.keys()) { const [h, k, l] = key.split(',').map(Number); put(h, k, l, radAt(key), 3); }
+    for (const key of marks.forbidden.keys()) { const [h, k, l] = key.split(',').map(Number); put(h, k, l, radAt(key), 4); }
+  }
+  _l3d.cpu = arr; // for hover / click picking
 
   const gl = _l3d.gl;
   if (!_l3d.pointBuf) _l3d.pointBuf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, _l3d.pointBuf);
   gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
   _l3d.nPoints = n;
-  _l3d.builtFor = data; _l3d.builtMode = mode; _l3d.builtFill = fill;
+  _l3d.builtFor = data; _l3d.builtMode = mode; _l3d.builtFill = fill; _l3d.builtMarks = marks;
   _l3d.gapsFor = state.showGaps ? data : null;
-  _l3d.els.status.innerHTML = `<small>${map.size} lattice points${state.showGaps ? ` · ${gaps.length} gaps in the whole sphere` : ''}</small>`;
+  l3dStatus(map.size, gaps.length);
+}
+
+// Totals for the whole sphere; marks follow their checkboxes.
+function l3dStatus(nPoints, nGaps) {
+  const st = _l3d.state, mk = st.mark || {}, marks = st.marks;
+  if (nPoints !== undefined) _l3d.counts = { nPoints, nGaps };
+  const c = _l3d.counts || { nPoints: 0, nGaps: 0 };
+  let html = `${c.nPoints} lattice points`;
+  if (st.showGaps) html += ` · ${c.nGaps} gaps`;
+  if (marks && mk.outliers) html += ` · <span class="reflMarkOutlier">${marks.outliers.size} outliers</span>`;
+  if (marks && mk.forbidden) html += ` · <span class="reflMarkForbidden">${marks.forbidden.size} forbidden but observed</span>`;
+  _l3d.els.status.innerHTML = `<small>${html} (whole sphere)</small>`;
 }
 
 // Same definition as computeLayerInfo (layer-viewer.js), for all layers at
@@ -187,19 +211,25 @@ function l3dGaps(data) {
 const L3D_VS_POINTS = `
 attribute vec3 aPos; attribute vec3 aHkl; attribute float aRad; attribute float aKind;
 uniform mat4 uMvp; uniform float uPx; uniform float uSize; uniform float uMinPx;
-uniform vec3 uAxis; uniform float uLayer; uniform float uPass; uniform float uGaps;
+uniform vec3 uAxis; uniform float uLayer; uniform float uPass; uniform vec3 uMarks; // gaps, outliers, forbidden
 varying float vKind;
 void main() {
   float on = abs(dot(aHkl, uAxis) - uLayer) < 0.5 ? 1.0 : 0.0;
-  bool hide = (uPass < 0.5 && on < 0.5) || (uPass > 0.5 && on > 0.5) || (aKind > 1.5 && uGaps < 0.5);
+  float markOff = aKind > 3.5 ? 1.0 - uMarks.z : aKind > 2.5 ? 1.0 - uMarks.y : aKind > 1.5 ? 1.0 - uMarks.x : 0.0;
+  bool hide = (uPass < 0.5 && on < 0.5) || (uPass > 0.5 && on > 0.5) || markOff > 0.5;
   gl_Position = hide ? vec4(2.0, 2.0, 2.0, 1.0) : uMvp * vec4(aPos, 1.0);
   float d = 2.0 * aRad * uPx * uSize;
-  gl_PointSize = aKind > 1.5 ? max(uMinPx * 3.0, d) : max(uMinPx, d);
+  float u = uMinPx / 1.3; // device pixels per CSS pixel
+  if (aKind > 3.5) gl_PointSize = max(9.0 * u, d * 1.15 + 3.0 * u);
+  else if (aKind > 2.5) gl_PointSize = max(9.0 * u, d + 6.0 * u);
+  else if (aKind > 1.5) gl_PointSize = max(uMinPx * 3.0, d);
+  else gl_PointSize = max(uMinPx, d);
   vKind = aKind;
 }`;
 const L3D_FS_POINTS = `
 precision mediump float;
-uniform vec4 uColM; uniform vec4 uColG; uniform vec4 uColGap; uniform float uAlpha; uniform float uGapAlpha;
+uniform vec4 uColM; uniform vec4 uColG; uniform vec4 uColGap; uniform vec4 uColOut; uniform vec4 uColForb;
+uniform float uAlpha; uniform float uGapAlpha;
 varying float vKind;
 void main() {
   vec2 p = gl_PointCoord * 2.0 - 1.0;
@@ -207,7 +237,12 @@ void main() {
   if (r2 > 1.0) discard;
   vec4 c;
   float a = uAlpha;
-  if (vKind > 1.5) { if (r2 < 0.5) discard; c = uColGap; a = uGapAlpha; }
+  if (vKind > 3.5) { // cross
+    if (abs(p.x - p.y) > 0.42 && abs(p.x + p.y) > 0.42) discard;
+    c = uColForb; a = uGapAlpha;
+  }
+  else if (vKind > 2.5) { if (r2 < 0.6) discard; c = uColOut; a = uGapAlpha; } // ring around the point
+  else if (vKind > 1.5) { if (r2 < 0.5) discard; c = uColGap; a = uGapAlpha; }
   else { c = vKind > 0.5 ? uColG : uColM; c.rgb *= 0.82 + 0.18 * (1.0 - r2); }
   if (a <= 0.0) discard;
   gl_FragColor = vec4(c.rgb, a);
@@ -316,10 +351,13 @@ function l3dDrawPoints(pass, alpha, gapAlpha, size, mvp, colors) {
   gl.uniform3fv(loc.uAxis, [st.axis === 'h' ? 1 : 0, st.axis === 'k' ? 1 : 0, st.axis === 'l' ? 1 : 0]);
   gl.uniform1f(loc.uLayer, st.n);
   gl.uniform1f(loc.uPass, pass);
-  gl.uniform1f(loc.uGaps, st.showGaps ? 1 : 0);
+  const mk = st.mark || {}, on = st.marks ? 1 : 0;
+  gl.uniform3fv(loc.uMarks, [st.showGaps ? 1 : 0, on && mk.outliers ? 1 : 0, on && mk.forbidden ? 1 : 0]);
   gl.uniform4fv(loc.uColM, l3dColor(colors.point));
   gl.uniform4fv(loc.uColG, l3dColor(colors.symFilled));
-  gl.uniform4fv(loc.uColGap, l3dColor('#dd3333'));
+  gl.uniform4fv(loc.uColGap, l3dColor(colors.gap));
+  gl.uniform4fv(loc.uColOut, l3dColor(colors.outlier));
+  gl.uniform4fv(loc.uColForb, l3dColor(colors.forbidden));
   gl.uniform1f(loc.uAlpha, alpha);
   gl.uniform1f(loc.uGapAlpha, gapAlpha);
   gl.bindBuffer(gl.ARRAY_BUFFER, _l3d.pointBuf);
@@ -388,9 +426,11 @@ function l3dRender() {
     l3dDrawFlat(gl.TRIANGLE_FAN, [disc.center].concat(disc.pts), l3dColor(col, pl.fill), mvp.m);
     l3dDrawFlat(gl.LINE_STRIP, disc.pts, l3dColor(col, pl.rim), mvp.m);
   }
-  // gaps of the other layers stay visible even with the points hidden, so a
-  // blind region shows up as a shape of its own
-  if (_l3d.others > 0 || st.showGaps) l3dDrawPoints(1, _l3d.others, 0.65, _l3d.size, mvp, colors);
+  // marks of the other layers have their own opacity: with the points hidden
+  // and the marks full, a blind region or a cloud of outliers shows up as a
+  // shape of its own
+  const anyMarks = (st.showGaps || (st.marks && st.mark && (st.mark.outliers || st.mark.forbidden))) && _l3d.marksOthers > 0;
+  if (_l3d.others > 0 || anyMarks) l3dDrawPoints(1, _l3d.others, anyMarks ? _l3d.marksOthers : 0, _l3d.size, mvp, colors);
   gl.depthMask(true);
 
   l3dDrawOverlay(cssW, colors, mvp.s);
@@ -442,17 +482,66 @@ function l3dRotate(ax, ay) {
   _l3d.rot = l3dOrtho(l3dMul(Rx, l3dMul(Ry, _l3d.rot)));
 }
 
+// Nearest visible point / gap under the cursor (CSS pixels of the overlay).
+// Points of the current layer win over the others, then the one in front.
+function l3dPick(clientX, clientY) {
+  const arr = _l3d.cpu, st = _l3d.state;
+  if (!arr || !st || !_l3d.rot) return null;
+  const b = _l3d.overlay.getBoundingClientRect();
+  if (!b.width) return null;
+  const cssW = b.width, mx = clientX - b.left, my = clientY - b.top;
+  const { s } = l3dMvp(), R = _l3d.rot, half = cssW / 2, pxW = s * half;
+  const mk = st.mark || {};
+  const showKind = [
+    _l3d.others > 0, _l3d.others > 0, !!st.showGaps,
+    !!(st.marks && mk.outliers), !!(st.marks && mk.forbidden),
+  ];
+  const axIdx = { h: 3, k: 4, l: 5 }[st.axis];
+  let best = null;
+  for (let i = 0; i < arr.length; i += 8) {
+    const kind = arr[i + 7], on = Math.abs(arr[i + axIdx] - st.n) < 0.5;
+    const visible = kind < 1.5 ? (on || showKind[kind]) : showKind[kind] && (on || _l3d.marksOthers > 0);
+    if (!visible) continue;
+    const x = arr[i], y = arr[i + 1], z = arr[i + 2];
+    const sx = half + pxW * (R[0][0] * x + R[0][1] * y + R[0][2] * z);
+    const sy = half - pxW * (R[1][0] * x + R[1][1] * y + R[1][2] * z);
+    const d = Math.hypot(sx - mx, sy - my);
+    const rad = arr[i + 6] * pxW * (on ? 1 : _l3d.size);
+    if (d > Math.max(rad + 2, 6)) continue;
+    const depth = R[2][0] * x + R[2][1] * y + R[2][2] * z;
+    const score = (on ? 1e6 : 0) - d + 0.5 * depth / _l3d.R; // nearest on screen; depth only breaks ties
+    if (!best || score > best.score) best = { score, h: arr[i + 3], k: arr[i + 4], l: arr[i + 5], kind };
+  }
+  if (!best) return null;
+  return { h: best.h, k: best.k, l: best.l, kind: best.kind === 2 ? 'gap' : best.kind === 1 ? 'generated' : 'measured' };
+}
+
+function l3dTipAt(e, pin) {
+  const it = l3dPick(e.clientX, e.clientY);
+  if (it) showReflectionTip(reflectionInfoHtml(_l3d.ctx, it, _l3d.state.marks || null), e.clientX, e.clientY, pin);
+  else if (!pin) hideReflectionTip(false);
+  _l3d.overlay.style.cursor = it ? 'pointer' : '';
+}
+
 function l3dAttachPointer(el) {
   const ptrs = new Map();
-  let pinch = null;
+  let pinch = null, start = null, hoverFrame = 0, lastMove = null;
   el.addEventListener('pointerdown', e => {
+    if (ptrs.size === 0) start = { x: e.clientX, y: e.clientY, moved: false };
+    hideReflectionTip(false);
     el.setPointerCapture(e.pointerId);
     ptrs.set(e.pointerId, [e.clientX, e.clientY]);
     if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), zoom: _l3d.zoom }; }
   });
   el.addEventListener('pointermove', e => {
     const prev = ptrs.get(e.pointerId);
-    if (!prev) return;
+    if (!prev) { // hovering (mouse, no button): info of the point under the cursor
+      if (e.pointerType !== 'mouse') return;
+      lastMove = e;
+      if (!hoverFrame) hoverFrame = requestAnimationFrame(() => { hoverFrame = 0; if (lastMove) l3dTipAt(lastMove, false); });
+      return;
+    }
+    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) start.moved = true;
     ptrs.set(e.pointerId, [e.clientX, e.clientY]);
     if (ptrs.size === 2 && pinch) {
       const [a, b] = [...ptrs.values()];
@@ -463,8 +552,13 @@ function l3dAttachPointer(el) {
     l3dRequest();
   });
   const up = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; };
-  el.addEventListener('pointerup', up);
+  el.addEventListener('pointerup', e => {
+    const click = ptrs.size === 1 && start && !start.moved;
+    up(e);
+    if (click) l3dTipAt(e, true); // a click (or tap) without dragging pins the info
+  });
   el.addEventListener('pointercancel', up);
+  el.addEventListener('pointerleave', () => { lastMove = null; hideReflectionTip(false); });
   el.addEventListener('wheel', e => {
     e.preventDefault();
     _l3d.zoom = Math.max(0.4, Math.min(8, _l3d.zoom * Math.exp(-e.deltaY * 0.0015)));
@@ -477,10 +571,10 @@ function l3dAttachPointer(el) {
 
 function initLaue3d(host, ctx) {
   _l3d.host = host;
-  l3dCloseModal(); // a new data set while enlarged: back to the page first
+  closeViewModal(); // a new data set while enlarged: back to the page first
   _l3d.ctx = ctx;
   _l3d.state = null;
-  _l3d.builtFor = null; _l3d.gaps = null; _l3d.gapsFor = null;
+  _l3d.builtFor = null; _l3d.builtMarks = null; _l3d.gaps = null; _l3d.gapsFor = null; _l3d.cpu = null; _l3d.counts = null;
   _l3d.basis = l3dBasis(ctx.cell);
   if (!_l3d.canvas) { // one canvas (= one WebGL context) for the lifetime of the page
     _l3d.canvas = document.createElement('canvas');
@@ -494,9 +588,9 @@ function initLaue3d(host, ctx) {
     `<label${title ? ` title="${title}"` : ''}><input type="checkbox" id="${id}"${_l3d.show[key] ? ' checked' : ''}> ${label}</label>`;
   host.innerHTML = `
     <div class="laue3dMain">
-      <div class="laue3dWrap">
-        <button type="button" class="laue3dExpand" title="enlarge the 3D view (with its controls)" aria-label="Enlarge 3D view">⤢</button>
-      </div>
+      <div class="viewHead"><span class="ctlTitle">3D · whole sphere</span>
+        <button type="button" class="viewExpand" title="enlarge the 3D view (with its controls)" aria-label="Enlarge 3D view">⤢</button></div>
+      <div class="laue3dWrap"></div>
       <div class="laue3dStatus"></div>
     </div>
     <div class="laue3dSide">
@@ -507,12 +601,19 @@ function initLaue3d(host, ctx) {
       </div>
       <div class="laue3dGroup">
         <span class="laue3dGroupTitle">Other layers</span>
-        <select id="l3dOthers">
-          <option value="0.2">faint</option>
-          <option value="0.75">full</option>
-          <option value="0">hidden</option>
-        </select>
-        <label title="spot size of the other layers; the current layer is drawn at the size of the 2D picture">size
+        <label class="l3dRow" title="reflections of the other layers"><span>points</span>
+          <select id="l3dOthers">
+            <option value="0.2">faint</option>
+            <option value="0.75">full</option>
+            <option value="0">hidden</option>
+          </select></label>
+        <label class="l3dRow" title="gaps, outliers and forbidden-but-observed marks of the other layers (switched on under Mark); the current layer always shows its marks"><span>marks</span>
+          <select id="l3dMarksOthers">
+            <option value="0.3">faint</option>
+            <option value="0.9">full</option>
+            <option value="0">hidden</option>
+          </select></label>
+        <label class="l3dRow" title="spot size of the other layers; the current layer is drawn at the size of the 2D picture"><span>size</span>
           <input type="range" id="l3dSize" min="0.15" max="1" step="0.05" value="${_l3d.size}"></label>
       </div>
       <div class="laue3dGroup">
@@ -523,110 +624,53 @@ function initLaue3d(host, ctx) {
       <p class="laue3dHint"><small>Drag to rotate · wheel or pinch to zoom · double-click to reset.</small></p>
     </div>`;
   const wrap = host.querySelector('.laue3dWrap');
-  wrap.insertBefore(_l3d.overlay, wrap.firstChild);
-  wrap.insertBefore(_l3d.canvas, wrap.firstChild);
+  wrap.appendChild(_l3d.canvas);
+  wrap.appendChild(_l3d.overlay);
   const q = id => host.querySelector('#' + id);
   _l3d.els = { status: host.querySelector('.laue3dStatus') };
   q('l3dOthers').value = String(_l3d.others);
   q('l3dOthers').addEventListener('change', e => { _l3d.others = parseFloat(e.target.value); l3dRequest(); });
+  q('l3dMarksOthers').value = String(_l3d.marksOthers);
+  q('l3dMarksOthers').addEventListener('change', e => { _l3d.marksOthers = parseFloat(e.target.value); l3dRequest(); });
   q('l3dSize').addEventListener('input', e => { _l3d.size = parseFloat(e.target.value); l3dRequest(); });
   q('l3dSphere').addEventListener('change', e => { _l3d.show.sphere = e.target.checked; l3dRequest(); });
   for (const z of L3D_PLANE_ZONES) q('l3dPlane_' + z.axis).addEventListener('change', e => { _l3d.show[z.axis] = e.target.checked; l3dRequest(); });
   q('l3dViewLayer').addEventListener('click', () => { if (_l3d.state) { _l3d.rot = l3dViewOntoLayer(_l3d.state.axis); l3dRequest(); } });
   q('l3dViewOblique').addEventListener('click', () => { _l3d.rot = l3dViewOblique(); l3dRequest(); });
-  host.querySelector('.laue3dExpand').addEventListener('click', () => (_l3dModal.overlay ? l3dCloseModal() : l3dOpenModal()));
+  host.querySelector('.viewExpand').addEventListener('click', () => (viewModalIsOpen() ? closeViewModal() : l3dOpenModal()));
   _l3d.rot = l3dViewOblique();
   _l3d.zoom = 1;
   if (_l3d.ro) _l3d.ro.disconnect();
   if (window.ResizeObserver) { _l3d.ro = new ResizeObserver(l3dRequest); _l3d.ro.observe(wrap); }
 }
 
-// ---------- enlarged view ----------
-// The 3D view and its controls (plus the layer viewer's slider row) are
-// MOVED into a centered card over the blurred page, same look as
-// plot-zoom.js, and moved back on close. Moving instead of copying keeps
-// the one WebGL context and all event listeners.
-
-const _l3dModal = { overlay: null, moved: [], key: null, prevOverflow: '' };
-
-function l3dModalSize() {
-  const narrow = window.innerWidth < 760;
-  const fit = narrow ? Math.min(window.innerWidth - 48, window.innerHeight - 330)
-                     : Math.min(window.innerWidth - 300, window.innerHeight - 150);
-  return Math.max(260, Math.floor(fit));
-}
+// ---------- enlarged view (view-modal.js) ----------
+// The 3D picture and its control column, plus the layer viewer's controls.
 
 function l3dOpenModal() {
-  if (_l3dModal.overlay || !_l3d.host) return;
+  if (!_l3d.host) return;
   const main = _l3d.host.querySelector('.laue3dMain'), side = _l3d.host.querySelector('.laue3dSide');
-  const layerRow = document.querySelector('#layerViewerContainer .layerControls');
-  const overlay = document.createElement('div');
-  overlay.className = 'plotZoomOverlay';
-  overlay.setAttribute('role', 'dialog');
-  overlay.setAttribute('aria-modal', 'true');
-  overlay.innerHTML = `
-    <div class="plotZoomCard laue3dModalCard">
-      <div class="plotZoomHead"><span><strong>Layer viewer · 3D</strong></span>
-        <button type="button" class="plotZoomClose" aria-label="Close">×</button></div>
-      <div class="laue3dModalLayer"></div>
-      <div class="laue3dModalBody"></div>
-    </div>`;
-  const move = (el, target) => {
-    if (!el) return;
-    const mark = document.createComment('laue3d');
-    el.parentNode.insertBefore(mark, el);
-    _l3dModal.moved.push({ el, mark });
-    target.appendChild(el);
-  };
-  move(layerRow, overlay.querySelector('.laue3dModalLayer'));
-  move(main, overlay.querySelector('.laue3dModalBody'));
-  move(side, overlay.querySelector('.laue3dModalBody'));
-  main.querySelector('.laue3dWrap').style.width = l3dModalSize() + 'px';
-  main.querySelector('.laue3dExpand').textContent = '⤡';
-  main.querySelector('.laue3dExpand').title = 'back to the page';
-
-  overlay.addEventListener('click', e => { if (e.target === overlay) l3dCloseModal(); });
-  overlay.querySelector('.plotZoomClose').addEventListener('click', l3dCloseModal);
-  _l3dModal.key = e => { if (e.key === 'Escape') l3dCloseModal(); };
-  document.addEventListener('keydown', _l3dModal.key);
-  _l3dModal.prevOverflow = document.body.style.overflow;
-  document.body.style.overflow = 'hidden';
-  document.body.appendChild(overlay);
-  _l3dModal.overlay = overlay;
-  overlay.querySelector('.plotZoomClose').focus();
-  l3dRequest();
+  const wrap = main.querySelector('.laue3dWrap'), btn = main.querySelector('.viewExpand');
+  openViewModal({
+    title: 'Layer viewer · 3D',
+    top: [document.querySelector('#layerViewerContainer .layerControls')],
+    body: [main, side],
+    onResize: () => { wrap.style.width = viewModalSquareSize(170) + 'px'; l3dRequest(); },
+    onClose: () => {
+      wrap.style.width = '';
+      btn.textContent = '⤢'; btn.title = 'enlarge the 3D view (with its controls)';
+      l3dRequest();
+    },
+  });
+  btn.textContent = '⤡'; btn.title = 'back to the page';
 }
-
-function l3dCloseModal() {
-  if (!_l3dModal.overlay) return;
-  for (const { el, mark } of _l3dModal.moved.reverse()) {
-    if (mark.parentNode) { mark.parentNode.insertBefore(el, mark); mark.remove(); }
-  }
-  _l3dModal.moved = [];
-  const wrap = _l3d.host && _l3d.host.querySelector('.laue3dWrap');
-  if (wrap) {
-    wrap.style.width = '';
-    const btn = wrap.querySelector('.laue3dExpand');
-    btn.textContent = '⤢'; btn.title = 'enlarge the 3D view (with its controls)';
-  }
-  _l3dModal.overlay.remove();
-  _l3dModal.overlay = null;
-  document.removeEventListener('keydown', _l3dModal.key);
-  document.body.style.overflow = _l3dModal.prevOverflow;
-  l3dRequest();
-}
-
-window.addEventListener('resize', () => {
-  if (!_l3dModal.overlay || !_l3d.host) return;
-  const wrap = _l3dModal.overlay.querySelector('.laue3dWrap');
-  if (wrap) wrap.style.width = l3dModalSize() + 'px';
-});
 
 // state: { axis, n, data, showGaps } of the layer viewer.
 function laue3dSync(state) {
   if (!_l3d.host || !_l3d.ctx) return;
   _l3d.state = state;
   _l3d.R = 2 * state.data.sMax || 1;
+  if (_l3d.els && _l3d.counts) l3dStatus();
   l3dRequest();
 }
 

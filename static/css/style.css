@@ -335,8 +335,41 @@ details.explain > summary { cursor: pointer; color: var(--text-muted); font-size
 details.explain[open] > summary { margin-bottom: 0.3rem; }
 details.explain > p { margin: 0.3rem 0; }
 
-.layerControls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.7rem; margin: 0.4rem 0; }
-#layerCanvas { cursor: zoom-in; }
+.layerControls {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center; gap: 0.55rem 1rem; margin: 0.4rem 0 0.9rem;
+}
+.ctlTitle, .laue3dGroupTitle {
+  font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+}
+.ctlRow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem 1.1rem; min-width: 0; }
+.ctlGroup { display: inline-flex; align-items: center; gap: 0.35rem; }
+#layerSlider { width: min(260px, 40vw); vertical-align: middle; }
+.layerLabel { min-width: 4.5em; font-variant-numeric: tabular-nums; }
+#layerPrev, #layerNext { min-width: 2.2em; }
+@media (max-width: 760px) {
+  .layerControls { grid-template-columns: minmax(0, 1fr); gap: 0.25rem; }
+  .layerControls .ctlRow { margin-bottom: 0.4rem; }
+}
+
+/* On/off switches instead of checkboxes, everywhere in the app */
+input[type="checkbox"] {
+  -webkit-appearance: none; appearance: none;
+  position: relative; flex: 0 0 auto; display: inline-block; vertical-align: middle;
+  width: 2.15em; height: 1.2em; margin: 0 0.45em 0 0; border-radius: 999px;
+  background: #c9ced6; cursor: pointer; transition: background-color 0.15s;
+}
+input[type="checkbox"]::before {
+  content: ""; position: absolute; top: 0.15em; left: 0.15em;
+  width: 0.9em; height: 0.9em; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s;
+}
+input[type="checkbox"]:checked { background: var(--accent); }
+input[type="checkbox"]:checked::before { transform: translateX(0.95em); }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
+label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center; cursor: pointer; }
+@media (prefers-color-scheme: dark) { input[type="checkbox"] { background: #4a4f59; } }
 
 /* Layer viewer: 2D layer | 3D sphere | 3D controls, tops aligned.
    The 3D host is display:contents, so its picture and its control column are
@@ -352,29 +385,59 @@ details.explain > p { margin: 0.3rem 0; }
 .laue3dWrap canvas { position: absolute; left: 0; top: 0; display: block; }
 .laue3dOverlay { cursor: grab; touch-action: none; }
 .laue3dOverlay:active { cursor: grabbing; }
-.laue3dExpand {
-  position: absolute; left: 6px; top: 6px; z-index: 1;
+.viewHead { display: flex; align-items: center; justify-content: space-between; height: 30px; margin-bottom: 0.3rem; }
+.viewExpand {
   width: 28px; height: 28px; padding: 0; line-height: 1; font-size: 1rem;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--surface); color: var(--text-muted); cursor: pointer; opacity: 0.85;
 }
-.laue3dExpand:hover { opacity: 1; color: var(--text); border-color: var(--accent); }
-.laue3dSide { display: flex; flex-direction: column; gap: 0.8rem; font-size: 0.9rem; }
+.viewExpand:hover { opacity: 1; color: var(--text); border-color: var(--accent); }
+.layer2dWrap { position: relative; line-height: 0; }
+.layer2dWrap canvas { display: block; }
+.laue3dSide { display: flex; flex-direction: column; gap: 0.8rem; font-size: 0.9rem; padding-top: calc(30px + 0.3rem); }
+@media (max-width: 760px) { .laue3dSide { padding-top: 0; } }
+.viewModalBody .laue3dSide { padding-top: calc(30px + 0.3rem); }
 .laue3dGroup { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3rem; }
 .laue3dGroup button, .laue3dGroup select { min-width: 7.5em; }
+.l3dRow { display: flex; align-items: center; gap: 0.4rem; }
+.l3dRow > span { width: 3.3em; color: var(--text-muted); }
+.l3dRow select { min-width: 5.5em; }
+.l3dRow input[type="range"] { width: 5.5em; }
 .laue3dGroup input[type="range"] { width: 100%; max-width: 8em; vertical-align: middle; }
-.laue3dGroupTitle { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
 .laue3dHint { margin: 0; color: var(--text-muted); }
+
+/* Layer viewer marks (reflection-marks.js): same symbols and colours as the plots */
+.layerMarks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.6rem; }
+.layerMarks label.disabled { color: var(--text-muted); }
+.reflMarkGap { color: #dd3333; }
+.reflMarkOutlier { color: #9b3fd6; }
+.reflMarkForbidden { color: var(--text); font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  .reflMarkGap { color: #ff5c5c; }
+  .reflMarkOutlier { color: #c98bff; }
+}
+
+/* hover / click info for one reflection */
+.reflTip {
+  position: fixed; z-index: 1100; display: none; max-width: 340px; pointer-events: none;
+  padding: 0.45rem 0.6rem; font-size: 0.8rem; line-height: 1.4;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.reflTip.pinned { pointer-events: auto; border-color: var(--accent); }
+.reflTipHint { margin-top: 0.3rem; font-size: 0.72rem; color: var(--text-muted); }
 @media (max-width: 760px) {
   .laue3dSide { flex-direction: row; flex-wrap: wrap; gap: 0.6rem 1.2rem; }
 }
-/* enlarged 3D view: picture with its control column, layer slider on top */
-.laue3dModalLayer .layerControls { margin-top: 0; }
-.laue3dModalBody { display: flex; gap: 1rem; align-items: flex-start; }
-.laue3dModalBody .laue3dSide { width: 150px; flex: 0 0 auto; }
+/* enlarged 2D / 3D view (view-modal.js): controls on top, picture (+ 3D control column) below */
+.viewModalTop .layerControls { margin-top: 0; }
+.viewModalBody { display: flex; gap: 1rem; align-items: flex-start; }
+.viewModalBody .laue3dSide { width: 150px; flex: 0 0 auto; }
+.viewModalBody > .layerView2d, .viewModalBody > .laue3dMain { width: min-content; } /* head and status as wide as the picture */
 @media (max-width: 760px) {
-  .laue3dModalBody { flex-direction: column; }
-  .laue3dModalBody .laue3dSide { width: auto; }
+  .viewModalBody { flex-direction: column; }
+  .viewModalBody .laue3dSide { width: auto; }
 }
 
 /* Laue plots: key for positions filled in from symmetry equivalents */
