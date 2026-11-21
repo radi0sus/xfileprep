@@ -247,8 +247,8 @@ function scoreCandidate(hallSymbol, observedScan) {
 // order-dependent rawCongruences list split identical groups. Consequences:
 // 50 pairs with different absences (P 42 2 2 / P 42 m c, F 4 3 2 / F -4 3 c,
 // P 63 2 2 / P 63 m c, ...) shared a signature, 6 identical ones (F d d d:1/:2,
-// R 3 2 / R 3 m, ...) did not. tests/absence-signature-check.js compares the
-// signatures with the true absences from the operators for all 530 settings.
+// R 3 2 / R 3 m, ...) did not (checked against the true absences from the
+// operators for all 530 settings).
 function conditionSignature(hallSymbol) {
   const calc = deriveAllConditions(hallSymbol);
   const zonal = {};

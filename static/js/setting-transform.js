@@ -31,10 +31,9 @@
 // v2's "verified" P 21/n -> P 21/c matrix [[-1,0,-1],[0,-1,0],[-1,0,0]]
 // actually re-indexes P 21/n data into P 21/a, and the I -> C matrix kept
 // the wrong centering. PLATON's matrix [[1,0,0],[0,-1,0],[-1,0,-1]], which
-// v2 rejected, is the correct one. tests/monoclinic-setting-regression.js
-// now checks every result against the reflections themselves (allowed in
-// the source group <=> allowed in the target group after h' = M h), an
-// independent test that does not share this module's operator algebra.
+// v2 rejected, is the correct one (checked against the reflections
+// themselves: allowed in the source group <=> allowed in the target group
+// after h' = M h).
 //
 // Monoclinic groups (Nos. 3-15): instead of a fixed pool, ALL integer
 // matrices with entries in {-1,0,1} and det = +1 are searched (covers cell

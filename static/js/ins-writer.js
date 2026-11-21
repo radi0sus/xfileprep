@@ -71,7 +71,6 @@ function getSymmetryCardData(hallSymbol) {
   // only by a centring vector, which LATT already supplies — I 41 c d got 15
   // SYMM cards instead of 7, F d d d:1 31 instead of 7. Any representative is
   // correct; the first one found (closest to the generators) is kept.
-  // tests/shelx-symm-expansion.js re-expands SYMM + LATT for every Hall entry.
   // Pure translations (rotation = identity, e.g. 0,1/2,1/2 from 4vw twice) are
   // centring vectors — LATT supplies them, so the identity rotation is "seen".
   const seenRotations = new Set(['1,0,0;0,1,0;0,0,1']);
