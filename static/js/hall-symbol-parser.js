@@ -161,7 +161,16 @@ function parseNatToken(token, position, previousOrder, previousAxis) {
   let R;
   let axisVector;
   let resolvedPrincipalAxis = null;
-  if (axisType === 'x' || axisType === 'y' || axisType === 'z') {
+  if (order === 1) {
+    // N = 1 has no axis: "1" is the identity, "-1" the inversion, wherever it
+    // stands. The body-diagonal default of the third position applies to
+    // N = 3 only; reading "-1n" in "P 2 2 -1n" (P n n n:1) as -3 along [111]
+    // gave a wrong, non-closing group (24 ops instead of 8) — affected were
+    // the origin-choice-1 Hall symbols of Nos. 59, 125, 129, 130, 133, 137,
+    // 138, 141, 142 (see tests/hall-operator-count.js).
+    R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    axisVector = [0, 0, 1];
+  } else if (axisType === 'x' || axisType === 'y' || axisType === 'z') {
     R = PRINCIPAL_ROTATION_MATRICES[axisType][order];
     axisVector = axisType === 'x' ? [1, 0, 0] : axisType === 'y' ? [0, 1, 0] : [0, 0, 1];
     resolvedPrincipalAxis = axisType;

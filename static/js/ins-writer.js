@@ -66,9 +66,21 @@ function getSymmetryCardData(hallSymbol) {
   const { centrosymmetric, latticeTranslations, generators } = parseHallSymbol(hallSymbol);
   const pointGroupOps = generatePointGroupOperators(generators);
 
+  // One card per rotation: the closure over generators with fractional
+  // translations (d, w, ...) yields copies of the same rotation that differ
+  // only by a centring vector, which LATT already supplies — I 41 c d got 15
+  // SYMM cards instead of 7, F d d d:1 31 instead of 7. Any representative is
+  // correct; the first one found (closest to the generators) is kept.
+  // tests/shelx-symm-expansion.js re-expands SYMM + LATT for every Hall entry.
+  // Pure translations (rotation = identity, e.g. 0,1/2,1/2 from 4vw twice) are
+  // centring vectors — LATT supplies them, so the identity rotation is "seen".
+  const seenRotations = new Set(['1,0,0;0,1,0;0,0,1']);
   const symmOps = pointGroupOps.filter(op => {
     if (isIdentityOp(op)) return false;
     if (centrosymmetric && det3x3(op.R) !== 1) return false; // auto-generated via the inversion center
+    const rk = op.R.map(r => r.join(',')).join(';');
+    if (seenRotations.has(rk)) return false;
+    seenRotations.add(rk);
     return true;
   });
 

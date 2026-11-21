@@ -45,6 +45,22 @@ static/
 tests/                  — regression tests, run with node from the project root (see Notes)
 ```
 
+## Tests
+
+Run from the project root with Node (no installation needed):
+
+| Command | What it checks | Time |
+|---|---|---|
+| `node tests/blind-run.js [folder]` | **Blind run** over real datasets (default `tests/data`): every CIF (reflections embedded, or in `name.hkl` / `name.hkl.txt` / `name.fcf` next to it) is solved from cell, reflections and formula only — Laue class from Rint, absences, candidates, E² tie-break — and only then compared with the space group the CIF reports. Result per file: `OK`, `TIE` (identical absences, e.g. I 4 2 2 / I -4 2 m — no absence analysis can decide), `RANK n`, `LAUE`, `MISS`, `ERROR`; exit code 1 unless all are OK/TIE. | seconds |
+| `node tests/short-axis-screw-regression.js` | Screw axes along short axes, stricter-period check, violations with few allowed reflections (synthetic data). | < 1 s |
+| `node tests/hall-operator-count.js` | All 530 Hall table entries: operator count, Laue-group order per IT number, origin choice 1 ↔ 2 = pure origin shift. | < 1 s |
+| `node tests/shelx-symm-expansion.js` | All 530 entries: the emitted SYMM + LATT cards, expanded as SHELXL does, give exactly the Hall group, with the minimal number of cards. | < 1 s |
+| `node tests/absence-signature-check.js` | All 530 entries: the true systematic absences (from the operators, up to symmetry equivalence) vs. the condition signature the app compares candidates by — settings with different absences must get different signatures, identical ones the same. Spot-checked against ITA A Table 1.6.4.8 (oC, mmm): all nine rows reproduced. | 2 s |
+| `node tests/sginfo-compare.js /path/to/sginfo` | Optional: all 530 entries against **SgInfo** (Grosse-Kunstleve), an independent space-group library — IT number, operator set, LATT, SYMM count, and table completeness. Build SgInfo once with `cc -O -w -o sginfo sginfo.c sgclib.c sgio.c sgfind.c sghkl.c sgsi.c -lm` in its source folder. | seconds |
+| `node tests/monoclinic-setting-regression.js` | Every setting transformation (all monoclinic pairs, orthorhombic permutations) against the systematic absences. | ~1 min |
+
+To grow the blind test set, drop further CIF(+HKL) pairs into `tests/data` — any structure whose CIF names the space group works, ideally with raw (unmerged) reflections. Current set: COD 1543504 (P 1 2₁/a 1, merged, short b axis), COD 1501632 (I -4 2 m, merged, identical extinction symbol), COD 1561021 (P c a b = non-standard Pbca, 112 000 raw reflections), COD 2023426 (F m -3 m, merged, JANA2006 CIF), COD 2010746 (F m -3 m, only 116 merged reflections), jg6 (I 4₁ c d, 74 000 raw reflections).
+
 ## Notes
 
 - CIF space-group metadata (Hall symbol, or H-M name + IT number) are used as an independent source for the Laue class; if they contradict the cell metric, the app falls back to the data analysis. Rint stays visible as a separate control table.
@@ -64,3 +80,8 @@ tests/                  — regression tests, run with node from the project roo
 - Screw axes along a **short axis**: an axial row needs only 3 allowed reflections (zones: 5). With b = 5.5 Å at 0.77 Å resolution 0k0 holds just 020/040/060, so the 2₁ was always "undetermined" and P 2/a, P a and P 2₁/a tied (COD 1543504, really P 2₁/a). The "why runners-up score lower" block also counts such an axial check as decisive, and says when the forbidden reflections are missing from the file altogether (deposited data with absences removed). Regression test: `node tests/short-axis-screw-regression.js` (incl. a P 2/a control that must not gain a 2₁). Together with this, the "stricter period" check (I 4 c m vs. I 4₁ c d, see above) is now asked only among the reflections the predicted period allows (e.g. "of the k = 2n, are the k = 4n+2 absent?"); over the whole row the candidate's own absences diluted it, and P 2₁/n lost to P n / P 2/n.
 - **Few allowed reflections, strong forbidden ones:** a condition with fewer allowed reflections than the minimum can't be confirmed, but it is now judged *violated* when at least two forbidden reflections are significant and reach ≥ 10 % of the allowed mean intensity (COD 1501632, I -4 2 m: 00l holds only 004/008 for l = 4n while 002/006 are strong, so I 4₁ 2 2 drops out instead of tying).
 - **Identical extinction symbols:** candidates whose predicted absences are exactly the same (e.g. I 4 2 2, I 4 m m, I -4 m 2, I -4 2 m, I 4/m m m for "I - - -") are reported as indistinguishable by absences instead of "not clearly separated". If a loaded CIF reports one of the top-scoring candidates, that one is preselected (and kept by the E² step if it fits its verdict); otherwise the order stays as before. Regression cases in `tests/short-axis-screw-regression.js`.
+- **F-centred data:** an F lattice satisfies the A, B and C conditions as well; the observed centring is now the most specific one that holds (F > I > R > A/B/C). Before, F data were taken as A-centred and e.g. m-3m had no candidates at all (COD 2023426).
+- **Hall parser, N = 1:** "-1n", "-1ab", "-1bw" at the third position of origin-choice-1 symbols (Nos. 59, 125, 129, 130, 133, 137, 138, 141, 142) were read as -3 along [111]; they are the inversion with a translation. These settings had cubic rotation groups and never matched their Laue class.
+- **Origin choices:** origin choice 1 vs 2 is found as a pure origin shift (shift search in 24ths — F d -3 m, F d d d, I 41/a m d differ by 1/8); shown as "matches as measured (other origin choice)", no HKLF matrix.
+- **SYMM cards:** one per rotation, no bare centring vectors (I 41 c d: 7 instead of 15; F d -3 m:2: 23 instead of 95). The groups were correct before, only redundant.
+- **Condition signature:** it was `JSON.stringify` of the derived conditions, in which the zone sets (`Set`) became `{}` — all zonal conditions of the full model, hhl in particular, were ignored. 50 pairs with different absences (P 4₂ 2 2 / P 4₂ m c, F 4 3 2 / F -4 3 c, P 6₃ 2 2 / P 6₃ m c, ...) looked identical, 6 identical ones (F d d d:1/:2, R 3 2 / R 3 m, ...) looked different. Affected the "identical absences" note, CIF preselection and setting deduplication — not the scores themselves. The signature is now exactly what the scoring tests.

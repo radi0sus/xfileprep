@@ -188,6 +188,19 @@ function scanLatticeCentering(reflections) {
   return results;
 }
 
+// The lattice the data actually show. Several centerings can "hold" at once
+// — an F lattice satisfies A, B and C as well (F = A + B + C), so taking the
+// first held entry in table order picked "A" for every F-centred dataset and
+// left no candidates in m-3m (COD 2023426, F m -3 m). Most specific first:
+// F, then I, R, then a single face (two faces holding imply the third = F).
+const CENTERING_SPECIFICITY = ['F', 'I', 'R (obverse)', 'R (reverse)', 'A', 'B', 'C'];
+function observedCenteringName(centering) {
+  const holds = name => centering[name] && centering[name].verdict === 'holds';
+  const faces = ['A', 'B', 'C'].filter(holds);
+  if (faces.length >= 2 && centering.F && centering.F.verdict !== 'violated') return 'F';
+  return CENTERING_SPECIFICITY.find(holds) || 'P (primitive)';
+}
+
 // --- Axial screw-axis conditions (h00, 0k0, 00l) -----------------------
 
 const AXIAL_CLASSES = {

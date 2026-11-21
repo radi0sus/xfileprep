@@ -135,8 +135,7 @@ function scoreCandidate(hallSymbol, observedScan) {
   const matchFraction = (expectHolds, violationPercent) =>
     expectHolds ? (100 - violationPercent) / 100 : violationPercent / 100;
 
-  const observedCenteringForScore = Object.entries(observedScan.centering)
-    .find(([name, r]) => name !== 'P (primitive)' && r.verdict === 'holds')?.[0] || 'P (primitive)';
+  const observedCenteringForScore = observedCenteringName(observedScan.centering);
   const centeringResult = observedScan.centering[observedCenteringForScore];
   checks.push({
     label: 'centering',
@@ -240,8 +239,23 @@ function scoreCandidate(hallSymbol, observedScan) {
 // alone exactly when their calculated conditions are identical — this is
 // the correct, physically-grounded reason to treat them as one candidate
 // (not "same space-group number", which is too broad; see below).
+// The signature is exactly what scoreCandidate can test: centring, the axial
+// periods, and for every named zonal condition whether the candidate predicts
+// it. It used to be JSON.stringify(deriveAllConditions(...)) — but
+// zonalAllowed holds Sets, which stringify to "{}", so every zonal condition
+// of the full model (hhl in particular) was silently ignored, and the
+// order-dependent rawCongruences list split identical groups. Consequences:
+// 50 pairs with different absences (P 42 2 2 / P 42 m c, F 4 3 2 / F -4 3 c,
+// P 63 2 2 / P 63 m c, ...) shared a signature, 6 identical ones (F d d d:1/:2,
+// R 3 2 / R 3 m, ...) did not. tests/absence-signature-check.js compares the
+// signatures with the true absences from the operators for all 530 settings.
 function conditionSignature(hallSymbol) {
-  return JSON.stringify(deriveAllConditions(hallSymbol));
+  const calc = deriveAllConditions(hallSymbol);
+  const zonal = {};
+  for (const zone of Object.keys(ZONAL_CONDITIONS)) {
+    zonal[zone] = ZONAL_CONDITIONS[zone].map(cond => (allowedSatisfies(calc.zonalAllowed[zone], cond.test) ? 1 : 0)).join('');
+  }
+  return JSON.stringify({ centering: calc.centering, axial: calc.axial, zonal });
 }
 
 // Collapses settings that produce the exact same calculated absence
@@ -289,8 +303,7 @@ function matchSpaceGroupCandidates(hallTable, laueClassName, observedScan, optio
   const laueMatches = hallTable.filter(entry =>
     candidateMatchesLaueClass(entry.hall, laueClassName, monoclinicAxis));
 
-  const observedCentering = Object.entries(observedScan.centering)
-    .find(([name, r]) => name !== 'P (primitive)' && r.verdict === 'holds')?.[0] || 'P (primitive)';
+  const observedCentering = observedCenteringName(observedScan.centering);
   const centeringMatches = laueMatches.filter(entry => {
     const { latticeTranslations } = parseHallSymbol(entry.hall);
     return latticeTranslationsToName(latticeTranslations) === observedCentering;

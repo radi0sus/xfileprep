@@ -145,40 +145,50 @@ function coordinateMatrix(M) {
 // into exactly stdOps, for SOME origin shift? Operators are conjugated
 // with the coordinate matrix Q: R' = Q R Q^-1, t' = Q t. The rotation
 // parts are compared first (cheap, rejects almost every wrong M); only
-// then is the origin shift searched, over all twelfths.
-function reproducesOperators(M, candOps, stdOps) {
+// then is the origin shift searched.
+//
+// Shift grid: twelfths, and with `fineShifts` also 24ths. Origin choices 1
+// and 2 of F d -3 m, F d d d, I 41/a m d, ... differ by 1/8 (e.g. -1/8,-1/8,-1/8
+// for F d -3 m), which no multiple of 1/12 hits — these were reported as
+// "matrix not found" although M is simply the identity (same hkl indexing).
+// Translations are handled in 24ths internally (exact: both operator sets
+// are in twelfths). Monoclinic searches don't need it and skip the fine grid
+// (it multiplies the shift loop by 8).
+function reproducesOperators(M, candOps, stdOps, fineShifts = false) {
   if (candOps.length !== stdOps.length) return false;
   const Q = coordinateMatrix(M);
   const Qinv = invert3x3(Q);
+  const m24 = x => ((x % 24) + 24) % 24;
+  const key = t => (m24(t[0]) * 24 + m24(t[1])) * 24 + m24(t[2]);
   const stdByRot = new Map();
   for (const op of stdOps) {
     const k = rotKey(op.R);
     if (!stdByRot.has(k)) stdByRot.set(k, new Set());
-    stdByRot.get(k).add(op.t.map(mod12).join(','));
+    stdByRot.get(k).add(key(op.t.map(x => 2 * x)));
   }
   const transformed = [];
   for (const op of candOps) {
     const R = matMul3(Q, matMul3(op.R, Qinv));
     const targets = stdByRot.get(rotKey(R));
     if (!targets) return false;
-    transformed.push({ R, t: matVec3(Q, op.t).map(mod12), targets });
+    transformed.push({ R, t: matVec3(Q, op.t).map(x => 2 * x), targets });
   }
   // identity-rotation ops (pure lattice translations) don't depend on the
-  // shift — check them once up front, then try the others first.
-  transformed.sort((x, y) => isIdentity3(y.R) - isIdentity3(x.R));
+  // shift — check them once up front.
   for (const op of transformed) {
-    if (isIdentity3(op.R) && !op.targets.has(op.t.join(','))) return false;
+    if (isIdentity3(op.R) && !op.targets.has(key(op.t))) return false;
   }
   const moving = transformed.filter(op => !isIdentity3(op.R));
-  for (let s0 = 0; s0 < 12; s0++)
-    for (let s1 = 0; s1 < 12; s1++)
-      for (let s2 = 0; s2 < 12; s2++) {
+  const step = fineShifts ? 1 : 2; // in 24ths
+  for (let s0 = 0; s0 < 24; s0 += step)
+    for (let s1 = 0; s1 < 24; s1 += step)
+      for (let s2 = 0; s2 < 24; s2 += step) {
         const v = [s0, s1, s2];
         let ok = true;
         for (const op of moving) {
-          const Rv = matVec3(op.R, v);
-          const t = op.t.map((ti, i) => mod12(ti + v[i] - Rv[i])).join(',');
-          if (!op.targets.has(t)) { ok = false; break; }
+          const R = op.R;
+          const t = [0, 1, 2].map(i => op.t[i] + v[i] - (R[i][0] * v[0] + R[i][1] * v[1] + R[i][2] * v[2]));
+          if (!op.targets.has(key(t))) { ok = false; break; }
         }
         if (ok) return true;
       }
@@ -274,7 +284,7 @@ function deriveTransformMatrix(candidateHall, standardHall, cell) {
       if (seen.has(key)) continue;
       seen.add(key);
       if (determinant3(M) <= 0) continue; // SHELX requires a positive-determinant HKLF matrix
-      if (reproducesOperators(M, candOps, stdOps)) { result = M; break; }
+      if (reproducesOperators(M, candOps, stdOps, true)) { result = M; break; }
     }
   }
   DERIVE_CACHE.set(cacheKey, result);

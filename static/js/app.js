@@ -145,7 +145,12 @@
       const cell = currentCellValues();
       const matrix = deriveTransformMatrix(native.hall, entry.hall, cell);
       if (!matrix) {
-        return '<span style="color:#b90" title="No matrix in the known pool reproduces this row\'s operators from the as-measured description — e.g. hexagonal/rhombohedral axes or an origin choice, not supported">different axis convention — matrix not found</span>';
+        return '<span style="color:#b90" title="No matrix in the known pool reproduces this row\'s operators from the as-measured description — e.g. hexagonal vs. rhombohedral axes, not supported">different axis convention — matrix not found</span>';
+      }
+      if (isIdentity3(matrix)) {
+        // Origin choice 1 vs 2 (F d -3 m, P n n n, I 41/a m d, ...): the same
+        // lattice and indexing, only the origin of the symmetry operators moves.
+        return `<span style="color:#888" title="Differs from ${formatHM(native.hm)} only by an origin shift: same cell, same hkl, no HKLF matrix. The .ins gets this row's symmetry operators directly.">matches as measured <small>(other origin choice)</small></span>`;
       }
       const esdNote = isPurePermutation(matrix)
         ? ''
@@ -225,8 +230,7 @@
     // /.hkl files) would otherwise look incomplete.
     function observedLatticeFilter() {
       const scan = cachedAbsenceScan();
-      const centName = Object.entries(scan.centering)
-        .find(([name, r]) => name !== 'P (primitive)' && r.verdict === 'holds')?.[0] || 'P (primitive)';
+      const centName = observedCenteringName(scan.centering);
       const lat = filterByLattice(lastReflections, centName[0]);
       const allowedTest = r => (!lat.test || lat.test(r)) && !isForbiddenByHeldConditions(scan, r.h, r.k, r.l);
       return { ...lat, allowedTest, scan };
@@ -913,7 +917,7 @@
       let settingTransform = null;
       if (nativeEntry.hall !== top.hall) {
         const matrix = deriveTransformMatrix(nativeEntry.hall, top.hall, values);
-        if (matrix) settingTransform = { matrix, nativeHM: nativeEntry.hm, isPurePermutation: isPurePermutation(matrix), obliqueNote: obliquenessNote(top, matrix, values) };
+        if (matrix && !isIdentity3(matrix)) settingTransform = { matrix, nativeHM: nativeEntry.hm, isPurePermutation: isPurePermutation(matrix), obliqueNote: obliquenessNote(top, matrix, values) };
       }
 
       const spaceGroupTag = top.hm.trim().replace(/\s+/g, ' '); // H-M with its spaces (P 1 21/a 1), as in the Hall table
