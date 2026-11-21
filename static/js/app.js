@@ -204,6 +204,7 @@
       renderLaueOverview(document.getElementById('laueVizContainer'), document.getElementById('laueVizNote'),
         lastReflections, cellForGroup, determinedLaueClass, determinedLaueClassSource, laueGroup);
       renderShellStats();
+      renderTwinCheck();
       renderLayerViewer();
     }
 
@@ -279,6 +280,82 @@
       } catch (err) {
         el.innerHTML = `<p style="color:#b00"><small>Could not compute shell statistics: ${err.message}</small></p>`;
       }
+    }
+
+    // Twin check (twin-check.js) under the current Laue class. The suggested
+    // TWIN/BASF lines go into the .ins only if the person ticks the box.
+    let lastTwinCheck = null;      // result of checkMerohedralTwinning, or null
+    let twinWriteToIns = false;    // checkbox state, survives re-renders of the section
+    // Hint on the E² tab: twinning narrows the intensity distribution (N(z),
+    // <|E²-1|>), so the centro/acentric verdict there is not reliable.
+    function renderE2TwinNote() {
+      const el = document.getElementById('eStatTwinNote');
+      if (!el) return;
+      const laws = lastTwinCheck && lastTwinCheck.applicable ? lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')) : [];
+      if (!laws.length) { el.innerHTML = ''; return; }
+      const best = laws.sort((a, b) => b.alpha - a.alpha)[0];
+      el.innerHTML = `<p style="color:#b60"><strong>⚠ Twinning found</strong> (Laue tab: <code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}).
+        Twinning averages the intensities of twin-related reflections and narrows their distribution: ⟨|E²−1|⟩ drops below the acentric value
+        and N(z) moves towards the twinned-acentric curve. The centrosymmetric/acentric verdict below is therefore unreliable — an "acentric" can
+        come from the twin alone, while a "centrosymmetric" despite the twin points to pseudo-symmetry (e.g. Z′ > 1, heavy atoms on special positions).</p>`;
+    }
+
+    function renderTwinCheck() {
+      const el = document.getElementById('twinCheckContainer');
+      if (!el) return;
+      lastTwinCheck = null;
+      try { renderTwinCheckInner(el); } finally { renderE2TwinNote(); }
+    }
+
+    function renderTwinCheckInner(el) {
+      if (!lastReflections) { el.innerHTML = ''; return; }
+      const cell = readCellOrNull();
+      if (!cell) { el.innerHTML = '<p><small>Needs all six cell constants.</small></p>'; return; }
+      try {
+        const classification = classifyCellMetric(cell);
+        const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
+        const laue = determinedLaueClass || classification.laueClasses[0];
+        const res = checkMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis);
+        lastTwinCheck = res;
+        if (!res.applicable) {
+          el.innerHTML = `<p><small>No twin law to test: ${res.reason}.</small></p>`;
+          if (lastMatchResults) generateIns();
+          return;
+        }
+        const fmtM = M => M.flat().join(' ');
+        const rows = res.laws.map((L, i) => {
+          const color = L.verdict === 'twinned' ? '#b60' : L.verdict.startsWith('perfect') ? '#b00' : '#080';
+          const dev = L.deviation ? `${L.deviation.angle.toFixed(2)}°${L.deviation.length > 0.0005 ? ` / ${(100 * L.deviation.length).toFixed(2)} %` : ''}` : '—';
+          return `<tr><td><code>TWIN ${fmtM(L.shelxMatrix)}</code></td><td>${dev}</td><td>${L.pairs}</td>
+            <td>${L.meanH === null ? '—' : L.meanH.toFixed(3)}</td>
+            <td>${L.alpha === null ? '—' : `${L.alpha.toFixed(2)} <small>± ${L.alphaSe.toFixed(3)}</small>`}</td>
+            <td style="color:${color}">${L.verdict}</td></tr>`;
+        }).join('');
+        const best = res.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((a, b) => b.alpha - a.alpha)[0];
+        const top = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
+        const acentricNote = top && !hallSymbolIsCentrosymmetric(top.hall)
+          ? ` The selected space group ${formatHM(top.hm)} is acentric: inversion (racemic) twinning cannot be seen in the intensities — check the Flack parameter after refinement; combined with this law it becomes <code>TWIN … -4</code> with three BASF values.`
+          : '';
+        el.innerHTML = `
+          <table class="shellTable"><thead><tr><th>Twin law (SHELX)</th><th title="Largest change of a cell parameter under the twin operation — 0 = exact merohedry">Metric deviation</th>
+            <th title="Acentric twin-related pairs, I1+I2 > ${res.laws[0] ? res.laws[0].selection : 10}σ">Pairs</th><th title="Untwinned: 0.5, perfect twin: 0">⟨H⟩</th><th>Twin fraction α</th><th>Verdict</th></tr></thead>
+            <tbody>${rows}</tbody></table>
+          <p><small>Laue class ${res.laue} in a ${res.holohedry} metric. α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
+            α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${res.holohedry} in the Laue table above.${acentricNote}</small></p>
+          ${best ? `<p><label><input type="checkbox" id="twinToIns" ${twinWriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${fmtM(best.shelxMatrix)}</code> and <code>BASF ${best.alpha.toFixed(2)}</code> to the .ins</span></label></p>` : ''}`;
+        const cb = document.getElementById('twinToIns');
+        if (cb) cb.addEventListener('change', () => { twinWriteToIns = cb.checked; if (lastMatchResults) generateIns(); });
+        if (lastMatchResults) generateIns();
+      } catch (err) {
+        el.innerHTML = `<p style="color:#b00"><small>Could not run the twin check: ${err.message}</small></p>`;
+      }
+    }
+
+    // The law the .ins should carry (checkbox ticked, a significant result), or null.
+    function twinForIns() {
+      if (!twinWriteToIns || !lastTwinCheck || !lastTwinCheck.applicable) return null;
+      const best = lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((a, b) => b.alpha - a.alpha)[0];
+      return best ? { matrix: best.shelxMatrix, basf: best.alpha } : null;
     }
 
     function runAbsencesScan() {
@@ -931,6 +1008,7 @@
         composition: formulaManuallyEdited ? null : lastInsComposition, // exact whole-cell counts, if a .ins/.res was loaded — takes priority over formula×Z UNLESS the person has since typed their own formula
         esd: lastCellEsd, // cell esds, if the source file provided them (CIF parens / .ins ZERR / .p4p CELLSD)
         settingTransform,
+        twin: twinForIns(),
       });
 
       const hasComposition = (lastInsComposition && lastInsComposition.length > 0) || formula.length > 0;
@@ -1233,6 +1311,7 @@
             selectedCandidateIndex = parseInt(e.target.value, 10);
             selectionSource = 'manual';
             generateIns(); // rebuild the .ins for the newly selected candidate right away
+            renderTwinCheck(); // its acentric/inversion-twin note depends on the selected space group
           });
         });
         resolve(true);
@@ -1352,6 +1431,7 @@
             if (newIndex !== selectedCandidateIndex) {
               selectedCandidateIndex = newIndex;
               generateIns(); // rebuild the .ins for the now-resolved candidate right away
+            renderTwinCheck(); // its acentric/inversion-twin note depends on the selected space group
               const radio = document.querySelector(`input[name="candidateSelect"][value="${newIndex}"]`);
               if (radio) radio.checked = true;
               autoSelectNote = `<p style="color:#080"><strong>✓ Candidate selection updated on the Space Group tab:</strong> switched the space-group pick to

@@ -119,7 +119,7 @@ function parseChemicalFormula(cifText) {
 // symmetry and atom coordinates ... must correspond to the indices after
 // transformation using this matrix").
 function generateInsFile(options) {
-  const { title, cell: rawCell, wavelength, hallSymbol, z, formula, composition, esd: rawEsd, settingTransform } = options;
+  const { title, cell: rawCell, wavelength, hallSymbol, z, formula, composition, esd: rawEsd, settingTransform, twin } = options;
 
   if (settingTransform && determinant3(settingTransform.matrix) <= 0) {
     throw new Error('setting-transform: refusing to write an HKLF matrix with non-positive determinant');
@@ -172,6 +172,14 @@ function generateInsFile(options) {
   } else {
     lines.push('SFAC C H N O ! TODO: replace with the actual elements');
     lines.push('UNIT 1 1 1 1  ! TODO: replace with element counts x Z');
+  }
+
+  // Optional twin law from the twin check (Laue tab), in SHELX convention
+  // (h' = R h). With a setting change it is expressed in the new indices.
+  if (twin && twin.matrix) {
+    const R = settingTransform ? twinMatrixInSetting(twin.matrix, settingTransform.matrix) : twin.matrix;
+    lines.push(`TWIN ${R.flat().join(' ')}`);
+    lines.push(`BASF ${twin.basf.toFixed(2)}`);
   }
 
   lines.push('TREF');
