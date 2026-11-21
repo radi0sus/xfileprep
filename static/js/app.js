@@ -24,7 +24,7 @@
     let determinedLaueClassSource = null; // 'cif' | 'merging' | null
     let lastMatchResults = null;
     let selectedCandidateIndex = 0;
-    let selectionSource = 'default'; // 'default' | 'manual' | 'auto-e-stat'
+    let selectionSource = 'default'; // 'default' | 'manual' | 'auto-e-stat' | 'cif'
     let lastInsComposition = null; // exact whole-unit-cell composition, from a loaded .ins's SFAC/UNIT
     let lastCellEsd = null; // {a,b,c,alpha,beta,gamma} esds from whichever source (CIF/.ins/.p4p) provided them
     // Tracks whether the person has typed into the formula field themselves
@@ -96,6 +96,25 @@
     // (I b a 2 scoring below I 2 c b for the same reflections) needs
     // exactly the same transform to be written correctly as the non-
     // standard row would.
+    // Index (in `results`) of the space group the loaded CIF reports, or -1.
+    // Hall symbol first; else H-M + IT number. A setting collapsed away by
+    // deduplicateByConditionSignature is matched by number + identical conditions.
+    function cifReportedCandidateIndex(results) {
+      const cell = lastCellExtras;
+      if (!cell) return -1;
+      let entry = null;
+      if (cell.reportedHallSymbol) entry = HALL_SYMBOLS_TABLE.find(e => e.hall === cell.reportedHallSymbol.trim());
+      if (!entry && cell.reportedSpaceGroupNumber != null && cell.reportedSpaceGroup) {
+        const norm = x => String(x).toLowerCase().replace(/\s+/g, '').replace(/:/g, '');
+        entry = HALL_SYMBOLS_TABLE.find(e => e.number === cell.reportedSpaceGroupNumber && norm(e.hm) === norm(cell.reportedSpaceGroup));
+      }
+      if (!entry) return -1;
+      const direct = results.findIndex(r => r.entry.hall === entry.hall);
+      if (direct >= 0) return direct;
+      const sig = conditionSignature(entry.hall);
+      return results.findIndex(r => r.entry.number === entry.number && conditionSignature(r.entry.hall) === sig);
+    }
+
     function currentCellValues() {
       return {
         a: parseFloat(cellFields.a.value), b: parseFloat(cellFields.b.value), c: parseFloat(cellFields.c.value),
@@ -923,7 +942,10 @@
       // Only worth flagging for an unreviewed default pick or to confirm an
       // E²-statistics-backed choice — a deliberate manual selection doesn't
       // need to be second-guessed here.
-      const tieNote = tiedOpposite && selectionSource !== 'manual'
+      const tieNote = tiedOpposite && selectionSource === 'cif'
+        ? `<p style="color:#069"><strong>${formatHM(top.hm)} is the space group the CIF reports.</strong> The absences cannot distinguish it from other top-scoring candidates
+           (see the Space Group tab); the data agree with it as well as with any of them.</p>`
+        : tiedOpposite && selectionSource !== 'manual'
         ? (selectionSource === 'auto-e-stat'
             ? `<p style="color:#080"><strong>✓ ${formatHM(top.hm)} was picked over the tied ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}) based on the E² statistics (tab 4)</strong> —
                absences alone couldn't distinguish them (both ${(topScore * 100).toFixed(0)}%), but the intensity-distribution check can, and did.</p>`
@@ -1055,6 +1077,18 @@
         lastMatchResults = results;
         selectedCandidateIndex = 0;
         selectionSource = 'default';
+        // Candidates the absences cannot tell apart at all (identical predicted
+        // conditions = same extinction symbol, e.g. I 4 2 2 / I 4 m m / I -4 m 2 /
+        // I -4 2 m / I 4/m m m for "I - - -"). If the CIF names one of the
+        // top-scoring rows, preselect it: the data don't contradict it, and
+        // nothing in them could prefer another member of the tie.
+        const topSignature = conditionSignature(results[0].entry.hall);
+        const sameAbsences = results.filter(r => r.score === results[0].score && conditionSignature(r.entry.hall) === topSignature);
+        const cifIndex = cifReportedCandidateIndex(results);
+        if (cifIndex > 0 && results[cifIndex].score === results[0].score) {
+          selectedCandidateIndex = cifIndex;
+          selectionSource = 'cif';
+        }
         generateIns(); // pre-populate the .ins tab with the top candidate right away
 
         const topTen = results.slice(0, 10);
@@ -1085,7 +1119,7 @@
 
         const rowHtml = (r, i) => `
           <tr>
-            <td><input type="radio" name="candidateSelect" value="${i}" ${i === 0 ? 'checked' : ''}></td>
+            <td><input type="radio" name="candidateSelect" value="${i}" ${i === selectedCandidateIndex ? 'checked' : ''}></td>
             <td>${r.entry.number}${r.entry.qualifier ? ':' + r.entry.qualifier : ''}</td>
             <td>${formatHM(r.entry.hm)}</td>
             <td>${r.entry.hall}</td>
@@ -1099,7 +1133,8 @@
         const topIsCentro = hallSymbolIsCentrosymmetric(results[0].entry.hall);
         const tiedOpposite = results.find(r =>
           r !== results[0] && r.score === topScore && hallSymbolIsCentrosymmetric(r.entry.hall) !== topIsCentro);
-        const tieWarning = tiedOpposite
+        const sameAbsencesHasBoth = sameAbsences.some(r => hallSymbolIsCentrosymmetric(r.entry.hall)) && sameAbsences.some(r => !hallSymbolIsCentrosymmetric(r.entry.hall));
+        const tieWarning = tiedOpposite && !(sameAbsences.length > 2 && sameAbsencesHasBoth)
           ? `<p style="color:#b00"><strong>⚠ The top ${(topScore * 100).toFixed(0)}% match is tied between an acentric and a centrosymmetric option</strong>
              (${formatHM(results[0].entry.hm)} vs. ${formatHM(tiedOpposite.entry.hm)}) — systematic absences alone can never break that particular tie, by Friedel's law.
              The <strong>E² Statistics</strong> tab shows which one the intensity distribution favours — pick that one using the radio buttons — the .ins tab uses
@@ -1115,7 +1150,11 @@
         // short by nature (b = 5.5 A: only 020/040/060 allowed, 7 positions in all), so
         // there the scan's own minimum of 3 allowed reflections (absences.js) counts —
         // otherwise a 2_1 along a short axis could never separate P 21/a from P 2/a.
-        const isWeighty = c => (c.axial ? (c.allowedCount || 0) >= 3 : c.weight >= 8);
+        // A clear axial VIOLATION (strong forbidden reflections, see judgeCondition) needs
+        // no allowed reference row: two significant forbidden reflections suffice.
+        const isWeighty = c => (c.axial
+          ? (c.allowedCount || 0) >= 3 || (c.verdict === 'violated' && (c.forbiddenCount || 0) >= 2)
+          : c.weight >= 8);
         const decisiveAgainst = r => r.checks.filter(c => contradicts(c) && isWeighty(c)).filter(c => {
           const t = results[0].checks.find(x => x.label === c.label);
           return !t || !contradicts(t);
@@ -1145,8 +1184,17 @@
         // (an exact acentric/centrosymmetric tie is already covered by the E² warning above).
         const unresolved = results.slice(1, 6).filter(r =>
           topScore - r.score <= 0.015 &&
+          !sameAbsences.includes(r) && // covered by the "identical absences" note below — not a data-quality question
           !(r.score === topScore && hallSymbolIsCentrosymmetric(r.entry.hall) !== topIsCentro) &&
           decisiveAgainst(r).length === 0);
+        const cifRow = selectionSource === 'cif' ? results[selectedCandidateIndex] : null;
+        const sameAbsencesHtml = sameAbsences.length > 1
+          ? `<p style="color:#069"><strong>ℹ Identical systematic absences:</strong> ${sameAbsences.map(r => formatHM(r.entry.hm)).join(', ')}
+              predict exactly the same absent reflections. No absence analysis can tell them apart (XPREP neither) — the equal percentages are not a data problem.
+              ${sameAbsencesHasBoth ? 'The <strong>E² Statistics</strong> tab decides centrosymmetric vs. acentric; between the remaining ones' : 'Between them,'}
+              only structure solution and refinement can decide (try each; check the result with ADDSYM in PLATON).
+              ${cifRow ? `<br><strong>${formatHM(cifRow.entry.hm)} is preselected because the CIF reports it</strong> — the data agree with it equally well.` : ''}</p>`
+          : (cifRow ? `<p style="color:#069"><strong>${formatHM(cifRow.entry.hm)} is preselected because the CIF reports it</strong> — it scores as high as the top row.</p>` : '');
         const unresolvedHtml = unresolved.length
           ? `<p style="color:#b60"><strong>⚠ ${formatHM(results[0].entry.hm)} (${(topScore * 100).toFixed(1)}%) is not clearly separated from
               ${unresolved.map(r => `${formatHM(r.entry.hm)} (${(r.score * 100).toFixed(1)}%)`).join(', ')}</strong> — no check contradicts the runner-up
@@ -1160,6 +1208,7 @@
           <h2>Space group candidates</h2>
           <p><small>Assumed Laue class: ${targetLaueClass} (${laueClassNote})</small></p>
           ${tieWarning}
+          ${sameAbsencesHtml}
           ${unresolvedHtml}
           <table>
             <tr><th>Use</th><th>No.</th><th>H-M symbol</th><th>Hall symbol</th><th>Match</th><th>Setting</th></tr>
@@ -1289,11 +1338,13 @@
           const topScore = lastMatchResults[0].score;
           const tiedGroup = lastMatchResults.filter(m => m.score === topScore);
           const matchesVerdict = m => hallSymbolIsCentrosymmetric(m.entry.hall) === (stats.verdict === 'centrosymmetric');
-          const resolved = tiedGroup.find(matchesVerdict);
+          // Keep the current pick (e.g. preselected from the CIF) if it already fits the verdict.
+          const current = lastMatchResults[selectedCandidateIndex];
+          const resolved = (current && tiedGroup.includes(current) && matchesVerdict(current)) ? current : tiedGroup.find(matchesVerdict);
           const wasActuallyTied = tiedGroup.some(m => !matchesVerdict(m));
           if (resolved && wasActuallyTied) {
             const newIndex = lastMatchResults.indexOf(resolved);
-            selectionSource = 'auto-e-stat'; // this pick is now backed by E² statistics either way
+            if (!(selectionSource === 'cif' && resolved === current)) selectionSource = 'auto-e-stat'; // this pick is now backed by E² statistics either way
             if (newIndex !== selectedCandidateIndex) {
               selectedCandidateIndex = newIndex;
               generateIns(); // rebuild the .ins for the now-resolved candidate right away
@@ -1302,7 +1353,7 @@
               autoSelectNote = `<p style="color:#080"><strong>✓ Candidate selection updated on the Space Group tab:</strong> switched the space-group pick to
                 ${formatHM(resolved.entry.hm)} (${resolved.entry.hall}) to match this ${stats.verdict} result — the SHELX .ins tab has been updated to match.</p>`;
             } else {
-              autoSelectNote = `<p><small>This confirms the already-selected candidate (${formatHM(resolved.entry.hm)}).</small></p>`;
+              autoSelectNote = `<p><small>This confirms the already-selected candidate (${formatHM(resolved.entry.hm)}${selectionSource === 'cif' ? ', preselected from the CIF' : ''}).</small></p>`;
             }
           }
         }

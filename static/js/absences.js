@@ -116,7 +116,18 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
 
   let verdict;
   let reason = null;
-  if (allowed.count < minCount) {
+  if (allowed.count < minCount && allowed.count >= 1 && forbiddenCount >= 2
+      && violationPercent > violationPercentThreshold && meanRatioPercent >= MAX_TAIL_MEAN_RATIO_PERCENT
+      && (medianISigma === null || medianISigma >= ABSENCE_SIGNIFICANCE_THRESHOLD)) {
+    // Too few allowed reflections to CONFIRM a condition — but a violation needs
+    // no large reference: forbidden reflections that are clearly significant and
+    // comparable in strength to the allowed ones refute it. (SrCu2(BO3)2, COD
+    // 1501632, I -4 2 m: 00l has only 004/008 for l = 4n, while 002 and 006 are
+    // strong — the 4_1 of I 4_1 2 2 is clearly absent, not "undetermined".)
+    verdict = 'violated';
+    reason = `only ${allowed.count} allowed reflection(s), but ${violationPercent.toFixed(0)}% of the ${forbiddenCount} forbidden ones exceed ${ABSENCE_SIGNIFICANCE_THRESHOLD}σ `
+      + `with ${meanRatioPercent.toFixed(0)}% of the allowed mean intensity — clearly present`;
+  } else if (allowed.count < minCount) {
     verdict = 'inconclusive';
     reason = `too few reference reflections in the allowed class (n=${allowed.count}, need ≥${minCount})`;
   } else if (allowedPresentPercent < (100 - presentPercentThreshold)) {
