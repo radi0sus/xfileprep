@@ -338,6 +338,45 @@ details.explain > p { margin: 0.3rem 0; }
 .layerControls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.7rem; margin: 0.4rem 0; }
 #layerCanvas { cursor: zoom-in; }
 
+/* Layer viewer: 2D layer | 3D sphere | 3D controls, tops aligned.
+   The 3D host is display:contents, so its picture and its control column are
+   grid items of their own; on narrow screens everything stacks. */
+.layerViews {
+  display: grid; gap: 1rem; align-items: start;
+  grid-template-columns: minmax(0, 420px) minmax(0, 420px) minmax(120px, 150px);
+}
+.layerView3d { display: contents; }
+.layerView2d, .laue3dMain { min-width: 0; }
+@media (max-width: 760px) { .layerViews { grid-template-columns: minmax(0, 420px); } }
+.laue3dWrap { position: relative; width: 100%; aspect-ratio: 1 / 1; }
+.laue3dWrap canvas { position: absolute; left: 0; top: 0; display: block; }
+.laue3dOverlay { cursor: grab; touch-action: none; }
+.laue3dOverlay:active { cursor: grabbing; }
+.laue3dExpand {
+  position: absolute; left: 6px; top: 6px; z-index: 1;
+  width: 28px; height: 28px; padding: 0; line-height: 1; font-size: 1rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text-muted); cursor: pointer; opacity: 0.85;
+}
+.laue3dExpand:hover { opacity: 1; color: var(--text); border-color: var(--accent); }
+.laue3dSide { display: flex; flex-direction: column; gap: 0.8rem; font-size: 0.9rem; }
+.laue3dGroup { display: flex; flex-direction: column; align-items: flex-start; gap: 0.3rem; }
+.laue3dGroup button, .laue3dGroup select { min-width: 7.5em; }
+.laue3dGroup input[type="range"] { width: 100%; max-width: 8em; vertical-align: middle; }
+.laue3dGroupTitle { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.laue3dHint { margin: 0; color: var(--text-muted); }
+@media (max-width: 760px) {
+  .laue3dSide { flex-direction: row; flex-wrap: wrap; gap: 0.6rem 1.2rem; }
+}
+/* enlarged 3D view: picture with its control column, layer slider on top */
+.laue3dModalLayer .layerControls { margin-top: 0; }
+.laue3dModalBody { display: flex; gap: 1rem; align-items: flex-start; }
+.laue3dModalBody .laue3dSide { width: 150px; flex: 0 0 auto; }
+@media (max-width: 760px) {
+  .laue3dModalBody { flex-direction: column; }
+  .laue3dModalBody .laue3dSide { width: auto; }
+}
+
 /* Laue plots: key for positions filled in from symmetry equivalents */
 .symFilledKey { color: rgb(225, 120, 10); }
 @media (prefers-color-scheme: dark) { .symFilledKey { color: rgb(255, 170, 80); } }

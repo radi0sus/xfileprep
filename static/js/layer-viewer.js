@@ -147,6 +147,7 @@ function refreshLayer() {
     ? '<small>No reflections in this layer.</small>'
     : `<small>${total} positions measured${filled ? ` · <span class="symFilledKey">${filled} filled in by symmetry</span>` : ''} · ${info.gaps.length} gap${info.gaps.length === 1 ? '' : 's'} (red rings)` +
       `${complete === null ? '' : ` · ${complete.toFixed(1)} % of the ${info.possible} possible unique-reflection positions in this layer covered (symmetry equivalents count)`}</small>`;
+  if (typeof laue3dSync === 'function') laue3dSync({ axis, n, data: _layer.data, showGaps: _layer.showGaps }); // laue-3d.js
 }
 
 function stopLayerPlay() {
@@ -183,8 +184,10 @@ function initLayerViewer(container, ctx) {
       <strong id="layerLabel"></strong>
       <label><input type="checkbox" id="layerGaps" checked> mark gaps</label>
     </p>
-    <canvas id="layerCanvas"></canvas>
-    <div id="layerStatus"></div>`;
+    <div class="layerViews">
+      <div class="layerView2d"><canvas id="layerCanvas"></canvas><div id="layerStatus"></div></div>
+      <div class="layerView3d" id="layer3dHost"></div>
+    </div>`;
   const q = id => container.querySelector('#' + id);
   _layer.els = { slider: q('layerSlider'), label: q('layerLabel'), status: q('layerStatus'), play: q('layerPlay') };
   _layer.canvas = q('layerCanvas');
@@ -211,6 +214,7 @@ function initLayerViewer(container, ctx) {
   });
   q('layerGaps').addEventListener('change', e => { _layer.showGaps = e.target.checked; refreshLayer(); });
   attachPlotZoom(_layer.canvas, `<strong>Layer viewer</strong>`, 420, (cv, zoom) => drawLayer(cv, zoom));
+  if (typeof initLaue3d === 'function') initLaue3d(q('layer3dHost'), ctx); // laue-3d.js (optional)
   refreshLayer();
 }
 
