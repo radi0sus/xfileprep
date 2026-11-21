@@ -185,14 +185,39 @@ const AXIAL_CLASSES = {
   '00l': { select: r => r.h === 0 && r.k === 0, indexOf: r => r.l },
 };
 
+// Axial rows hold only a handful of reflections by nature: along a short
+// axis (b = 5.5 A at d_min = 0.77 A: 0k0 runs to k = 7) there are just
+// three allowed ones, 020/040/060. The zonal default of 5 reference
+// reflections made a 2_1 along such an axis permanently "undetermined", so
+// P 2/a, P a and P 21/a tied (COD 1543504, actually P 21/a). XPREP judges
+// screw axes from as few reflections; 3 is the minimum used here — the
+// allowed ones still have to be mostly significant (presentPercentThreshold).
+const AXIAL_MIN_ALLOWED_COUNT = 3;
+
 function scanAxialCondition(reflections, axisName, periods = [2, 3, 4, 6]) {
   const cls = AXIAL_CLASSES[axisName];
   const relevant = reflections.filter(cls.select);
-  return periods.map(n => ({
-    period: n,
-    ...judgeCondition(residueBuckets(relevant, cls.indexOf, n)),
-    reflectionCount: relevant.length,
-  }));
+  return periods.map(n => {
+    // `given[p]`: the same period-n test, but only among the reflections that
+    // period p (a divisor of n) already allows — "of the k = 2n reflections, are
+    // the k = 4n+2 ones absent?". That is the question a candidate predicting
+    // period p must answer for a stricter period n. Asked over the whole row,
+    // the absences the candidate itself predicts (k odd) dilute the violation
+    // percentage and cost the RIGHT candidate credit (P 21/n lost to P n on
+    // 0k0 k = 6n: 42 % violation overall, but 100 % among the even k).
+    const given = {};
+    for (const p of periods) {
+      if (p >= n || n % p !== 0) continue;
+      const subset = relevant.filter(r => mod(cls.indexOf(r), p) === 0);
+      given[p] = judgeCondition(residueBuckets(subset, r => cls.indexOf(r) / p, n / p), { minCount: AXIAL_MIN_ALLOWED_COUNT });
+    }
+    return {
+      period: n,
+      ...judgeCondition(residueBuckets(relevant, cls.indexOf, n), { minCount: AXIAL_MIN_ALLOWED_COUNT }),
+      reflectionCount: relevant.length,
+      given,
+    };
+  });
 }
 
 // --- Zonal glide-plane conditions (0kl, h0l, hk0 and the diagonal plane hhl) --

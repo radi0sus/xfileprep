@@ -17,23 +17,37 @@
 // validated by scoring it against the observed reflections) and VERIFY it
 // reproduces the standard entry's operator set exactly before using it.
 //
-// Method: search a fixed pool of candidate 3x3 integer matrices (signed
-// permutations only — swap/negate whole axes, no shear — plus the one
-// genuine monoclinic-choice-2 shear) for one that, applied to the matched
-// candidate's operators (rotation part conjugated, translation part
-// transformed, then optionally re-origin-shifted), exactly reproduces the
-// standard entry's operator set as a set. If more than one matrix in the
-// pool passes (happens when the space group's own symmetry makes two
-// relabelings equivalent — observed for exactly this Iba2 case), the first
-// in a fixed, deterministic order is used; any passing matrix is equally
-// physically correct, this just makes the choice reproducible.
+// Method: find 3x3 integer matrices M that, applied to the matched
+// candidate's operators, exactly reproduce the target entry's operator set
+// (as a set, for SOME origin shift). M is always the CELL-AXIS matrix in
+// SHELX convention (rows = new axes in terms of old ones, a' = M a), the
+// same matrix applied to h,k,l and written on the HKLF line.
 //
-// The pool itself (8 matrices) still comes from PLATON's TRDAT table
-// (platon.f ~line 25612) — not because it's trusted blindly anymore, but
-// because it's a convenient, ITA-conventional set of *candidates worth
-// trying*. Every one of them is now checked against the actual matched
-// entries before use, so a wrong guess is caught (returns null) rather
-// than silently applied.
+// v3 — CONVENTION FIX (monoclinic cell choices). Fractional coordinates do
+// NOT transform with M but with Q = (M^-1)^T (x' = Q x). v2 conjugated the
+// operators with M itself. For signed permutations (orthogonal, Q = M)
+// that is harmless, which is why all orthorhombic cases and the monoclinic
+// choice 3 -> 1 relabeling were right. For a genuine shear it is not:
+// v2's "verified" P 21/n -> P 21/c matrix [[-1,0,-1],[0,-1,0],[-1,0,0]]
+// actually re-indexes P 21/n data into P 21/a, and the I -> C matrix kept
+// the wrong centering. PLATON's matrix [[1,0,0],[0,-1,0],[-1,0,-1]], which
+// v2 rejected, is the correct one. tests/monoclinic-setting-regression.js
+// now checks every result against the reflections themselves (allowed in
+// the source group <=> allowed in the target group after h' = M h), an
+// independent test that does not share this module's operator algebra.
+//
+// Monoclinic groups (Nos. 3-15): instead of a fixed pool, ALL integer
+// matrices with entries in {-1,0,1} and det = +1 are searched (covers cell
+// choices 1/2/3, A/C/I centering and a/b/c-unique axis changes). Several
+// valid matrices exist for any pair (a' can be any lattice vector in the
+// ac plane that completes the basis); with a cell given, the one giving
+// the least oblique cell is chosen (shortest axes, then monoclinic angle
+// closest to 90, obtuse preferred) — the IUCr/ITA convention, and what
+// XPREP/PLATON do. Without a cell, the sparsest matrix wins.
+//
+// Other groups: the signed-permutation pool below (from PLATON's TRDAT
+// table, platon.f ~line 25612) is tried; every candidate is still checked
+// against the real operators before use, a failure returns null.
 //
 // SHELX convention (SHELX manual, HKLF instruction): new_h = r11*h +
 // r12*k + r13*l — the same matrix that transforms the cell edges is
@@ -46,8 +60,6 @@ const CANDIDATE_MATRIX_POOL = [
   [[0, 0, 1], [0, 1, 0], [-1, 0, 0]], // "-cba"
   [[0, 0, 1], [1, 0, 0], [0, 1, 0]], // "bca"
   [[1, 0, 0], [0, 0, -1], [0, 1, 0]], // "a-cb"
-  [[0, 0, 1], [0, -1, 0], [1, 0, 0]], // monoclinic choice 3 (a-glide) -> choice 1 (c-glide): pure relabeling
-  [[-1, 0, -1], [0, -1, 0], [-1, 0, 0]], // monoclinic choice 2 (n-glide) -> choice 1 (c-glide): genuine shear — found by brute-force search over small unimodular matrices and verified against actual operators; an earlier hand-transcription from platon.f ([[1,0,0],[0,-1,0],[-1,0,-1]]) looked plausible but FAILED verification (no origin shift reconciled all 4 operators) — proof this whole derive-and-verify approach earns its keep
 ];
 
 function determinant3(M) {
@@ -120,69 +132,160 @@ function isPurePermutation(M) {
 
 // --- The actual derivation: search + verify against real operators -------
 
-function seitzKey(op) {
-  return op.R.map(r => r.join(',')).join(';') + '|' + op.t.map(mod12).join(',');
+function rotKey(R) {
+  return R.map(r => r.join(',')).join(';');
 }
 
-// Re-origins a transformed operator set by shift v (in twelfths), the same
-// way hall-symbol-parser.js's internal shift logic works: t' = t + v - R*v.
-function shiftOperators(ops, v) {
-  return ops.map(op => {
-    const Rv = matVec3(op.R, v);
-    return { R: op.R, t: op.t.map((ti, i) => mod12(ti + v[i] - Rv[i])) };
-  });
+// Fractional-coordinate matrix belonging to cell-axis matrix M: x' = Q x.
+function coordinateMatrix(M) {
+  return transpose3(invert3x3(M));
 }
 
-// Does applying M to candOps (rotation conjugated: R' = M R M^-1;
-// translation: t' = M t) reproduce stdOps exactly, for SOME choice of
-// origin? Shifts in quarter-cell steps (0, 1/4, 1/2, 3/4 per axis) are
-// tried — sufficient for every case in CANDIDATE_MATRIX_POOL (verified:
-// the monoclinic choice-2 shear needs exactly a 1/4-cell shift on two
-// axes; the pure permutations need none) — not an exhaustive twelfths
-// search, which would be needed for full generality beyond this pool.
+// Does the basis change M (cell-axis convention, see header) turn candOps
+// into exactly stdOps, for SOME origin shift? Operators are conjugated
+// with the coordinate matrix Q: R' = Q R Q^-1, t' = Q t. The rotation
+// parts are compared first (cheap, rejects almost every wrong M); only
+// then is the origin shift searched, over all twelfths.
 function reproducesOperators(M, candOps, stdOps) {
   if (candOps.length !== stdOps.length) return false;
-  const Minv = invert3x3(M); // NOT transpose — M isn't orthogonal for the monoclinic shear case
-  const transformed = candOps.map(op => ({
-    R: matMul3(M, matMul3(op.R, Minv)),
-    t: matVec3(M, op.t).map(mod12),
-  }));
-  const stdKeySet = new Set(stdOps.map(seitzKey));
-  // Step by quarters (3 twelfths), not just halves — the monoclinic
-  // choice-2 shear needs a 1/4-cell origin shift to line up, found by
-  // direct calculation from its translation parts (0/6-only missed it).
-  for (let s0 = 0; s0 < 12; s0 += 3)
-    for (let s1 = 0; s1 < 12; s1 += 3)
-      for (let s2 = 0; s2 < 12; s2 += 3) {
-        const keys = shiftOperators(transformed, [s0, s1, s2]).map(seitzKey);
-        if (keys.every(k => stdKeySet.has(k))) return true;
+  const Q = coordinateMatrix(M);
+  const Qinv = invert3x3(Q);
+  const stdByRot = new Map();
+  for (const op of stdOps) {
+    const k = rotKey(op.R);
+    if (!stdByRot.has(k)) stdByRot.set(k, new Set());
+    stdByRot.get(k).add(op.t.map(mod12).join(','));
+  }
+  const transformed = [];
+  for (const op of candOps) {
+    const R = matMul3(Q, matMul3(op.R, Qinv));
+    const targets = stdByRot.get(rotKey(R));
+    if (!targets) return false;
+    transformed.push({ R, t: matVec3(Q, op.t).map(mod12), targets });
+  }
+  // identity-rotation ops (pure lattice translations) don't depend on the
+  // shift — check them once up front, then try the others first.
+  transformed.sort((x, y) => isIdentity3(y.R) - isIdentity3(x.R));
+  for (const op of transformed) {
+    if (isIdentity3(op.R) && !op.targets.has(op.t.join(','))) return false;
+  }
+  const moving = transformed.filter(op => !isIdentity3(op.R));
+  for (let s0 = 0; s0 < 12; s0++)
+    for (let s1 = 0; s1 < 12; s1++)
+      for (let s2 = 0; s2 < 12; s2++) {
+        const v = [s0, s1, s2];
+        let ok = true;
+        for (const op of moving) {
+          const Rv = matVec3(op.R, v);
+          const t = op.t.map((ti, i) => mod12(ti + v[i] - Rv[i])).join(',');
+          if (!op.targets.has(t)) { ok = false; break; }
+        }
+        if (ok) return true;
       }
   return false;
 }
 
-// Tries every matrix in the pool AND its inverse (many pool entries aren't
-// self-inverse) against the candidate's actual operators, returns the
-// first that reproduces the standard entry's operators exactly, or null
-// if the whole pool fails (genuinely unhandled relationship — e.g.
-// rhombohedral hex/rhomb axes, tetragonal/trigonal origin choices — the
+function isIdentity3(R) {
+  return R[0][0] === 1 && R[1][1] === 1 && R[2][2] === 1
+    && R[0][1] === 0 && R[0][2] === 0 && R[1][0] === 0 && R[1][2] === 0 && R[2][0] === 0 && R[2][1] === 0;
+}
+
+// All integer 3x3 matrices with entries in {-1,0,1} and determinant +1,
+// sparsest first (deterministic order). Built once, lazily.
+let SMALL_UNIMODULAR_CACHE = null;
+function smallUnimodularMatrices() {
+  if (SMALL_UNIMODULAR_CACHE) return SMALL_UNIMODULAR_CACHE;
+  const out = [];
+  for (let n = 0; n < 19683; n++) {
+    let x = n;
+    const e = [];
+    for (let i = 0; i < 9; i++) { e.push((x % 3) - 1); x = Math.floor(x / 3); }
+    const M = [e.slice(0, 3), e.slice(3, 6), e.slice(6, 9)];
+    if (determinant3(M) === 1) out.push(M);
+  }
+  const nonzero = M => M.flat().filter(v => v !== 0).length;
+  out.sort((A, B) => nonzero(A) - nonzero(B));
+  SMALL_UNIMODULAR_CACHE = out;
+  return out;
+}
+
+function isMonoclinicNumber(n) {
+  return n >= 3 && n <= 15;
+}
+
+// Monoclinic angle of a cell = the one furthest from 90 degrees.
+function monoclinicAngle(cell) {
+  return [cell.alpha, cell.beta, cell.gamma].reduce((w, x) => (Math.abs(x - 90) > Math.abs(w - 90) ? x : w));
+}
+
+function cellIsUsable(cell) {
+  return !!cell && ['a', 'b', 'c', 'alpha', 'beta', 'gamma'].every(k => Number.isFinite(cell[k]) && cell[k] > 0);
+}
+
+// Ranks valid matrices for a given measured cell: least oblique cell
+// first (sum of axis lengths, 0.01 A tolerance; then |angle - 90|; then
+// obtuse angle preferred, the ITA convention for monoclinic cells), the
+// sparsest matrix as final tie-break (input order is already sparsest
+// first and Array.prototype.sort is stable).
+function pickLeastObliqueMatrix(matrices, cell) {
+  if (!cellIsUsable(cell)) return matrices[0];
+  const scored = matrices.map(M => {
+    const c = transformCellParameters(cell, M);
+    const ang = monoclinicAngle(c);
+    return { M, len: Math.round((c.a + c.b + c.c) * 100), dev: Math.round(Math.abs(ang - 90) * 100), acute: ang < 90 - 1e-6 ? 1 : 0 };
+  });
+  scored.sort((x, y) => x.len - y.len || x.dev - y.dev || x.acute - y.acute);
+  return scored[0].M;
+}
+
+const DERIVE_CACHE = new Map();
+
+// Returns a matrix M (cell-axis / HKLF convention) that transforms the
+// candidate setting's cell/hkl into the standard (target) setting's, or
+// null if none is found (genuinely unhandled relationship — e.g.
+// rhombohedral hex/rhomb axes, tetragonal/cubic origin choices — the
 // caller should leave the setting untransformed rather than guess).
-function deriveTransformMatrix(candidateHall, standardHall) {
+// `cell` (optional, as measured) picks the least oblique of several valid
+// monoclinic matrices; numbers are only needed to decide whether the
+// monoclinic search applies and are derived from the operators otherwise.
+function deriveTransformMatrix(candidateHall, standardHall, cell) {
+  const cacheKey = candidateHall + '|' + standardHall + '|'
+    + (cellIsUsable(cell) ? ['a', 'b', 'c', 'alpha', 'beta', 'gamma'].map(k => cell[k].toFixed(3)).join(',') : '');
+  if (DERIVE_CACHE.has(cacheKey)) return DERIVE_CACHE.get(cacheKey);
+
   const candOps = generateSpaceGroupOperators(candidateHall);
   const stdOps = generateSpaceGroupOperators(standardHall);
-  const pool = [];
-  for (const M of CANDIDATE_MATRIX_POOL) {
-    pool.push(M);
-    pool.push(invert3x3(M));
+  const entry = typeof HALL_SYMBOLS_TABLE !== 'undefined' ? HALL_SYMBOLS_TABLE.find(e => e.hall === standardHall) : null;
+  const monoclinic = entry ? isMonoclinicNumber(entry.number) : isMonoclinicOperatorSet(stdOps);
+
+  let result = null;
+  if (monoclinic) {
+    const valid = smallUnimodularMatrices().filter(M => reproducesOperators(M, candOps, stdOps));
+    if (valid.length) result = pickLeastObliqueMatrix(valid, cell);
+  } else {
+    const pool = [];
+    for (const M of CANDIDATE_MATRIX_POOL) {
+      pool.push(M);
+      pool.push(invert3x3(M));
+    }
+    const seen = new Set();
+    for (const M of pool) {
+      const key = M.flat().join(',');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (determinant3(M) <= 0) continue; // SHELX requires a positive-determinant HKLF matrix
+      if (reproducesOperators(M, candOps, stdOps)) { result = M; break; }
+    }
   }
-  const seen = new Set();
-  for (const M of pool) {
-    const key = M.flat().join(',');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (determinant3(M) <= 0) continue; // SHELX requires a positive-determinant HKLF matrix
-    if (reproducesOperators(M, candOps, stdOps)) return M;
-  }
-  return null;
+  DERIVE_CACHE.set(cacheKey, result);
+  return result;
+}
+
+// Fallback when the Hall table isn't loaded: a monoclinic point group has
+// 2 or 4 distinct rotation parts, one 2-fold/mirror axis.
+function isMonoclinicOperatorSet(ops) {
+  const rots = new Set(ops.map(op => rotKey(op.R)));
+  return rots.size === 2 || rots.size === 4 ? [...rots].some(k => k !== '1,0,0;0,1,0;0,0,1' && k !== '-1,0,0;0,-1,0;0,0,-1') : false;
 }
 
 // Transforms cell parameters {a,b,c,alpha,beta,gamma} (degrees) through
@@ -232,26 +335,23 @@ function permuteEsds(esd, M) {
 
 // Given a matched candidate entry ({number, qualifier, hm, hall}) and the
 // full Hall table, returns the standardization transform, or null if the
-// candidate is already standard or no matrix in the pool reproduces the
-// standard entry's operators from this candidate's (see deriveTransformMatrix).
+// candidate is already standard or no matrix reproduces the standard
+// entry's operators from this candidate's (see deriveTransformMatrix).
 //
-// "Standard" sibling: same `number`, qualifier === null for orthorhombic-
-// style entries; qualifier === "b1" for monoclinic ones (b-unique only —
-// a1../c1.. candidates are left untransformed, not implemented).
+// "Standard" sibling: same `number`, qualifier null/"abc" for orthorhombic-
+// style entries; for monoclinic ones b-unique cell choice 1 ("b1", or "b"
+// for groups without cell choices) — from any a/b/c-unique, any cell choice,
+// including the "-b1".. style entries of Nos. 9 and 15.
 //
 // Return shape: { matrix, standardEntry, isPurePermutation }
 // — matrix transforms THIS candidate's cell/hkl into standardEntry's.
-function getStandardizationTransform(entry, hallTable) {
+function getStandardizationTransform(entry, hallTable, cell) {
   const q = entry.qualifier;
 
-  const monoMatch = typeof q === 'string' && /^([abc])([123])$/.exec(q);
-  if (monoMatch) {
-    const [, axis, choice] = monoMatch;
-    if (axis !== 'b') return null; // a/c-unique cell choice: not implemented
-    if (choice === '1') return null; // already standard
-    const standardEntry = hallTable.find(e => e.number === entry.number && e.qualifier === 'b1');
-    if (!standardEntry) return null;
-    const matrix = deriveTransformMatrix(entry.hall, standardEntry.hall);
+  if (isMonoclinicNumber(entry.number)) {
+    const standardEntry = hallTable.find(e => e.number === entry.number && (e.qualifier === 'b1' || e.qualifier === 'b'));
+    if (!standardEntry || standardEntry.hall === entry.hall) return null;
+    const matrix = deriveTransformMatrix(entry.hall, standardEntry.hall, cell);
     if (!matrix) return null;
     return { matrix, standardEntry, isPurePermutation: isPurePermutation(matrix) };
   }
@@ -259,7 +359,7 @@ function getStandardizationTransform(entry, hallTable) {
   if (q === null || q === 'abc') return null; // already standard (or unqualified, nothing to do)
   const standardEntry = hallTable.find(e => e.number === entry.number && (e.qualifier == null || e.qualifier === 'abc'));
   if (!standardEntry) return null;
-  const matrix = deriveTransformMatrix(entry.hall, standardEntry.hall);
+  const matrix = deriveTransformMatrix(entry.hall, standardEntry.hall, cell);
   if (!matrix) return null;
   return { matrix, standardEntry, isPurePermutation: isPurePermutation(matrix) };
 }

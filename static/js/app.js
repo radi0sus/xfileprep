@@ -96,6 +96,25 @@
     // (I b a 2 scoring below I 2 c b for the same reflections) needs
     // exactly the same transform to be written correctly as the non-
     // standard row would.
+    function currentCellValues() {
+      return {
+        a: parseFloat(cellFields.a.value), b: parseFloat(cellFields.b.value), c: parseFloat(cellFields.c.value),
+        alpha: parseFloat(cellFields.alpha.value), beta: parseFloat(cellFields.beta.value), gamma: parseFloat(cellFields.gamma.value),
+      };
+    }
+
+    // Monoclinic only: if the target cell choice is clearly more oblique
+    // than the measured one (e.g. P 21/n with beta 95 -> P 21/c with beta
+    // 125), say so — IUCr/ITA recommend the least oblique cell choice, so
+    // the as-measured setting is normally the better one to refine in.
+    function obliquenessNote(entry, matrix, cell) {
+      if (!(entry.number >= 3 && entry.number <= 15) || !cellIsUsable(cell)) return '';
+      const before = monoclinicAngle(cell);
+      const after = monoclinicAngle(transformCellParameters(cell, matrix));
+      if (Math.abs(after - 90) <= Math.abs(before - 90) + 0.5) return '';
+      return `<br><small style="color:#b90" title="IUCr/ITA convention: choose the monoclinic cell choice with the least oblique angle. The space group is the same either way; only the description differs.">⚠ more oblique: ${after.toFixed(2)}° instead of ${before.toFixed(2)}° — the measured setting is the recommended one</small>`;
+    }
+
     function describeSetting(entry) {
       if (!lastMatchResults) return '';
       const sameNumber = lastMatchResults.filter(r => r.entry.number === entry.number);
@@ -104,14 +123,15 @@
       if (native.hall === entry.hall) {
         return '<span style="color:#888">matches as measured</span>';
       }
-      const matrix = deriveTransformMatrix(native.hall, entry.hall);
+      const cell = currentCellValues();
+      const matrix = deriveTransformMatrix(native.hall, entry.hall, cell);
       if (!matrix) {
-        return '<span style="color:#b90" title="No matrix in the known pool reproduces this row\'s operators from the as-measured description — likely a different axis-unique convention (e.g. a/c-unique monoclinic), not yet supported">different axis convention — matrix not found</span>';
+        return '<span style="color:#b90" title="No matrix in the known pool reproduces this row\'s operators from the as-measured description — e.g. hexagonal/rhombohedral axes or an origin choice, not supported">different axis convention — matrix not found</span>';
       }
       const esdNote = isPurePermutation(matrix)
         ? ''
         : '<br><small style="color:#b90">⚠ cell-choice shear — esds not recalculated</small>';
-      return `<span style="color:#069" title="Your cell/hkl as measured natively match ${formatHM(native.hm)}. To use this row (${formatHM(entry.hm)}) instead, transform with this matrix.">as measured (${formatHM(native.hm)}) → <strong>${formatHM(entry.hm)}</strong><br><code style="font-size:0.85em">${formatHKLFMatrix(matrix)}</code>${esdNote}</span>`;
+      return `<span style="color:#069" title="Your cell/hkl as measured natively match ${formatHM(native.hm)}. To use this row (${formatHM(entry.hm)}) instead, transform with this matrix.">as measured (${formatHM(native.hm)}) → <strong>${formatHM(entry.hm)}</strong><br><code style="font-size:0.85em">${formatHKLFMatrix(matrix)}</code>${esdNote}${obliquenessNote(entry, matrix, cell)}</span>`;
     }
 
     const absencesResultEl = document.getElementById('absencesResult');
@@ -804,7 +824,6 @@
 
     const spaceGroupResultEl = document.getElementById('spaceGroupResult');
 
-    const insBtn = document.getElementById('generateInsBtn');
     const insResultEl = document.getElementById('insResult');
     const insActionsEl = document.getElementById('insActions');
     const insCopyBtn = document.getElementById('insCopyBtn');
@@ -862,11 +881,11 @@
       const nativeEntry = sameNumberResults.reduce((best, r) => (r.score > best.score ? r : best), sameNumberResults[0]).entry;
       let settingTransform = null;
       if (nativeEntry.hall !== top.hall) {
-        const matrix = deriveTransformMatrix(nativeEntry.hall, top.hall);
-        if (matrix) settingTransform = { matrix, nativeHM: nativeEntry.hm, isPurePermutation: isPurePermutation(matrix) };
+        const matrix = deriveTransformMatrix(nativeEntry.hall, top.hall, values);
+        if (matrix) settingTransform = { matrix, nativeHM: nativeEntry.hm, isPurePermutation: isPurePermutation(matrix), obliqueNote: obliquenessNote(top, matrix, values) };
       }
 
-      const spaceGroupTag = top.hm.replace(/\s+/g, '');
+      const spaceGroupTag = top.hm.trim().replace(/\s+/g, ' '); // H-M with its spaces (P 1 21/a 1), as in the Hall table
       const ins = generateInsFile({
         title: lastLoadedFileBaseName ? `${lastLoadedFileBaseName} in ${spaceGroupTag}` : spaceGroupTag,
         cell: values,
@@ -903,7 +922,7 @@
         : '';
 
       const settingNote = settingTransform
-        ? `<p style="color:#069"><small>Cell transformed from as-measured (${formatHM(settingTransform.nativeHM)}) into this setting; the .hkl file itself is untouched — SHELXL re-indexes it via the HKLF matrix.</small></p>`
+        ? `<p style="color:#069"><small>Cell transformed from as-measured (${formatHM(settingTransform.nativeHM)}) into this setting; the .hkl file itself is untouched — SHELXL re-indexes it via the HKLF matrix.</small>${settingTransform.obliqueNote || ''}</p>`
         : '';
 
       insResultEl.innerHTML = `
@@ -918,7 +937,6 @@
       insActionsEl.style.display = 'flex';
       insCopyNoteEl.textContent = '';
     }
-    insBtn.addEventListener('click', generateIns);
 
     // Tab 6: "Save as .hkl" block, visible only while lastHklExport is set.
     const hklSaveSectionEl = document.getElementById('hklSaveSection');
@@ -1025,7 +1043,6 @@
         lastMatchResults = results;
         selectedCandidateIndex = 0;
         selectionSource = 'default';
-        insBtn.style.display = 'inline-block';
         generateIns(); // pre-populate the .ins tab with the top candidate right away
 
         const topTen = results.slice(0, 10);
@@ -1073,7 +1090,7 @@
         const tieWarning = tiedOpposite
           ? `<p style="color:#b00"><strong>⚠ The top ${(topScore * 100).toFixed(0)}% match is tied between an acentric and a centrosymmetric option</strong>
              (${formatHM(results[0].entry.hm)} vs. ${formatHM(tiedOpposite.entry.hm)}) — systematic absences alone can never break that particular tie, by Friedel's law.
-             The <strong>E² Statistics</strong> tab shows which one the intensity distribution favours — pick that one using the radio buttons — "Generate .ins" uses
+             The <strong>E² Statistics</strong> tab shows which one the intensity distribution favours — pick that one using the radio buttons — the .ins tab uses
              whichever row is selected, not just the top one.</p>`
           : '';
 
@@ -1082,7 +1099,12 @@
         // "violated" at 67 % scores 0.33 for a candidate that predicts it, yet is clearly wrong.)
         const contradicts = c => c.verdict && c.expectHolds !== undefined &&
           ((c.verdict === 'holds' && !c.expectHolds) || (c.verdict === 'violated' && c.expectHolds));
-        const decisiveAgainst = r => r.checks.filter(c => contradicts(c) && c.weight >= 8).filter(c => {
+        // Weight floor against noise: 8 reflections for zone checks. An axial row is
+        // short by nature (b = 5.5 A: only 020/040/060 allowed, 7 positions in all), so
+        // there the scan's own minimum of 3 allowed reflections (absences.js) counts —
+        // otherwise a 2_1 along a short axis could never separate P 21/a from P 2/a.
+        const isWeighty = c => (c.axial ? (c.allowedCount || 0) >= 3 : c.weight >= 8);
+        const decisiveAgainst = r => r.checks.filter(c => contradicts(c) && isWeighty(c)).filter(c => {
           const t = results[0].checks.find(x => x.label === c.label);
           return !t || !contradicts(t);
         });
@@ -1090,7 +1112,8 @@
           const stricter = c.label.match(/^(\S+) period (\d+) \(stricter than the predicted (\d+)\)/);
           if (stricter) return `${stricter[1]}: the data obey period ${stricter[2]}, but this candidate only predicts period ${stricter[3]}`;
           const none = c.label.match(/^(\S+) period 1$/);
-          if (none) return `${none[1]}: the data show absences along this axis (a screw-axis condition), but this candidate predicts none`;
+          if (none) return `${none[1]}: the data show absences along this axis (a screw-axis condition), but this candidate predicts none`
+            + (c.forbiddenCount === 0 ? ` <small>(the forbidden reflections are not in the file at all — typical for deposited data with the absences removed, so this rests on the ${c.allowedCount} allowed ones)</small>` : '');
           return c.expectHolds ? `${c.label}: predicted by this candidate, but the data violate it`
                                : `${c.label}: the data obey it, but this candidate does not predict it`;
         };

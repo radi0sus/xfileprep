@@ -178,6 +178,7 @@ function scoreCandidate(hallSymbol, observedScan) {
       match: matchFraction(calcPeriod !== 1, reference.violationPercent),
       expectHolds: calcPeriod !== 1, verdict: reference.verdict, // kept for the UI: clear contradictions between candidates
       weight: reference.reflectionCount, // every period partitions the SAME reflection set on this axis, so the weight is period-independent
+      axial: true, allowedCount: reference.allowedCount, forbiddenCount: reference.forbiddenCount,
     });
 
     // The checks above only ask "does the predicted absence hold?". A candidate
@@ -187,13 +188,18 @@ function scoreCandidate(hallSymbol, observedScan) {
     // predicting only l = 2n says should be present. (I 4 c m vs. I 4₁ c d:
     // the 4₁ axis shows up on 00l only as l = 4n, so without this check both
     // scored the same.) Stricter periods are the multiples of the predicted one.
+    // Judged only among the reflections the predicted period allows (absences.js,
+    // `given`), so the candidate's own predicted absences don't count against it.
     if (calcPeriod > 1) {
-      for (const stricter of informative.filter(r => r.period > calcPeriod && r.period % calcPeriod === 0)) {
+      for (const stricter of results.filter(r => r.period > calcPeriod && r.period % calcPeriod === 0)) {
+        const cond = stricter.given && stricter.given[calcPeriod];
+        if (!cond || cond.verdict === 'inconclusive') continue;
         checks.push({
           label: `${axis} period ${stricter.period} (stricter than the predicted ${calcPeriod})`,
-          match: matchFraction(false, stricter.violationPercent),
-          expectHolds: false, verdict: stricter.verdict,
+          match: matchFraction(false, cond.violationPercent),
+          expectHolds: false, verdict: cond.verdict,
           weight: stricter.reflectionCount,
+          axial: true, allowedCount: cond.allowedCount, forbiddenCount: cond.forbiddenCount,
         });
       }
     }

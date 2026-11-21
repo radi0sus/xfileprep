@@ -124,7 +124,7 @@ function generateInsFile(options) {
   const { symmLines, lattNumber } = getSymmetryCardData(hallSymbol);
 
   const lines = [];
-  const titleSuffix = settingTransform ? ` (measured as ${settingTransform.nativeHM.replace(/\s+/g, '')})` : '';
+  const titleSuffix = settingTransform ? ` (measured as ${settingTransform.nativeHM.trim().replace(/\s+/g, ' ')})` : '';
   lines.push(`TITL ${(title || 'structure')}${titleSuffix}`);
 
   // SHELX only requires whitespace-separated numbers here, but XPREP-style
