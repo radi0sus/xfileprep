@@ -443,3 +443,12 @@ label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center;
 /* Laue plots: key for positions filled in from symmetry equivalents */
 .symFilledKey { color: rgb(225, 120, 10); }
 @media (prefers-color-scheme: dark) { .symFilledKey { color: rgb(255, 170, 80); } }
+
+/* Twinning: tab badge and the banner under the tab bar (visible on every tab) */
+.tabBtn.twinAlert { color: var(--warning); }
+.tabBtn.twinAlert.active { border-bottom-color: var(--warning); }
+.twinBanner {
+  margin: 0.4rem 0 0.8rem; padding: 0.45rem 0.8rem; border-radius: 8px;
+  border: 1px solid var(--warning); color: var(--text); font-size: 0.92rem;
+}
+.twinBanner a { color: var(--accent); cursor: pointer; }

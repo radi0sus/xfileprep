@@ -294,17 +294,60 @@
       const laws = lastTwinCheck && lastTwinCheck.applicable ? lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')) : [];
       if (!laws.length) { el.innerHTML = ''; return; }
       const best = laws.sort((a, b) => b.alpha - a.alpha)[0];
-      el.innerHTML = `<p style="color:#b60"><strong>⚠ Twinning found</strong> (Laue tab: <code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}).
+      el.innerHTML = `<p style="color:#b60"><strong>⚠ Twinning found</strong> (Twinning tab: <code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}).
         Twinning averages the intensities of twin-related reflections and narrows their distribution: ⟨|E²−1|⟩ drops below the acentric value
         and N(z) moves towards the twinned-acentric curve. The centrosymmetric/acentric verdict below is therefore unreliable — an "acentric" can
         come from the twin alone, while a "centrosymmetric" despite the twin points to pseudo-symmetry (e.g. Z′ > 1, heavy atoms on special positions).</p>`;
+    }
+
+    // What the twin checks found worth flagging: a twinned law and/or an
+    // inversion twin (x >= 0.1 with enough expected signal). Null if nothing.
+    function twinFindings() {
+      const out = [];
+      if (lastTwinCheck && lastTwinCheck.applicable) {
+        const best = lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((x, y) => y.alpha - x.alpha)[0];
+        if (best) out.push({ kind: 'law', text: `<code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}` });
+      }
+      const t = lastAnomalousCheck && lastAnomalousCheck.twin;
+      const sel = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
+      // an inversion twin only exists in an acentric space group
+      if (t && t.x >= 0.1 && t.expectedChi2 >= 1.5 && sel && !hallSymbolIsCentrosymmetric(sel.hall)) out.push({ kind: 'inversion', text: `inversion twin, x ≈ ${t.x.toFixed(2)}${t.x >= 0.35 ? ' (or centrosymmetric)' : ''}` });
+      return out.length ? out : null;
+    }
+
+    // Smallest integer direction with the first non-zero component positive
+    // ([0 -2 0] -> [0 1 0]; centring halves are doubled first).
+    function reducedDirection(v) {
+      let w = v.map(x => Math.round(x * 6)); // halves and thirds (centring vectors) become integers
+      const gcd = (a, b) => (b ? gcd(b, a % b) : Math.abs(a));
+      const g = w.reduce((a, x) => gcd(a, x), 0) || 1;
+      w = w.map(x => x / g);
+      const first = w.find(x => x !== 0);
+      return first < 0 ? w.map(x => -x || 0) : w;
+    }
+
+    // Tab badge + banner under the tab bar, visible on every tab.
+    function updateTwinAlerts() {
+      const f = twinFindings();
+      const btn = document.getElementById('twinTabBtn');
+      if (btn) {
+        btn.classList.toggle('twinAlert', !!f);
+        btn.textContent = f ? '3. Twinning ⚠' : '3. Twinning';
+      }
+      const banner = document.getElementById('twinBanner');
+      if (!banner) return;
+      if (!f) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+      banner.innerHTML = `<strong>⚠ Twinning found:</strong> ${f.map(x => x.text).join(' · ')} — <a id="twinBannerLink">see the Twinning tab</a>.`;
+      banner.style.display = 'block';
+      const link = document.getElementById('twinBannerLink');
+      if (link) link.addEventListener('click', () => window.switchTab && window.switchTab('tab-twin'));
     }
 
     function renderTwinCheck() {
       const el = document.getElementById('twinCheckContainer');
       if (!el) return;
       lastTwinCheck = null;
-      try { renderTwinCheckInner(el); } finally { renderE2TwinNote(); }
+      try { renderTwinCheckInner(el); } finally { renderE2TwinNote(); updateTwinAlerts(); }
     }
 
     function renderTwinCheckInner(el) {
@@ -319,7 +362,17 @@
         const laue = determinedLaueClass || classification.laueClasses[0];
         const res = checkMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis, observedCenteringName(cachedAbsenceScan().centering));
         lastTwinCheck = res;
-        html += '<h3>Twin laws beyond the Laue class</h3>';
+        // lattice 2-fold axes (Le Page) — where the twin laws come from
+        const folds = res.folds || [];
+        html += `<h3>Lattice symmetry (Le Page)</h3>
+          <p><small>2-fold axes of the lattice, found independent of the cell choice: a lattice direction [uvw] (nearly) perpendicular to a lattice plane (hkl);
+            the obliquity δ is the angle between them. Laue class ${res.laue}; lattice symmetry <strong>${res.holohedry}</strong> (${res.holohedryNote}).</small></p>`;
+        html += folds.length
+          ? `<table class="shellTable"><thead><tr><th>Axis [uvw]</th><th>⊥ plane (hkl)</th><th>Obliquity δ</th><th>In the Laue class?</th></tr></thead><tbody>${
+              folds.map(f => `<tr><td>[${reducedDirection(f.t).join(' ')}]</td><td>(${reducedDirection(f.h).join(' ')})</td><td>${f.delta.toFixed(3)}°</td>
+                <td>${f.inLaue ? 'yes' : (f.used ? '<strong>no — possible twin law</strong>' : 'no (inconsistent with the others, not used)')}</td></tr>`).join('')}</tbody></table>`
+          : '<p><small>No 2-fold axis within the tolerance.</small></p>';
+        html += '<h3>Twin laws beyond the Laue class (H test)</h3>';
         if (!res.applicable) {
           html += `<p><small>No twin law to test: ${res.reason}.</small></p>`;
         } else {
@@ -337,8 +390,11 @@
             <table class="shellTable"><thead><tr><th>Twin law (SHELX)</th><th title="Le Page obliquity: angle between the lattice direction and the reciprocal-lattice normal of the 2-fold axis — 0 = exact (merohedry), small = pseudo-merohedry">Obliquity δ</th>
               <th title="Acentric twin-related pairs, I1+I2 > ${res.laws[0] ? res.laws[0].selection : 10}σ">Pairs</th><th title="Untwinned: 0.5, perfect twin: 0">⟨H⟩</th><th>Twin fraction α</th><th>Verdict</th></tr></thead>
               <tbody>${rows}</tbody></table>
-            <p><small>Laue class ${res.laue}; lattice symmetry ${res.holohedry} (${res.holohedryNote}) — found from the lattice itself, independent of the cell choice. α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
-              α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${res.holohedry} in the Laue table above.</small></p>
+            <p><small>α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
+              α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${res.holohedry} on the Laue tab.</small></p>
+            <div id="nhPlotContainer"></div>
+            <p><small>N(H): straight lines are ideal twins with fraction α; an observed curve that bends away from them points to pseudo-symmetry rather than a clean twin.</small></p>
+            ${best ? `<p style="color:#b60"><small>Twinning narrows the intensity distribution, so the centrosymmetric/acentric verdict on the E² tab is unreliable for this data set.</small></p>` : ''}
             ${best ? `<p><label><input type="checkbox" id="twinToIns" ${twinWriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${fmtM(best.shelxMatrix)}</code> with <code>BASF ${best.alpha.toFixed(2)}</code> to the .ins</span></label></p>` : ''}`;
         }
       } catch (err) {
@@ -346,6 +402,8 @@
       }
       html += renderInversionTwinHtml(cell);
       el.innerHTML = html;
+      const nhEl = document.getElementById('nhPlotContainer');
+      if (nhEl && lastTwinCheck && lastTwinCheck.applicable) renderNHPlot(nhEl, lastTwinCheck.laws);
       const cb = document.getElementById('twinToIns');
       if (cb) cb.addEventListener('change', () => { twinWriteToIns = cb.checked; if (lastMatchResults) generateIns(); });
       const cbInv = document.getElementById('invTwinToIns');
@@ -769,7 +827,7 @@
 
       sourceInfoEl.innerHTML = `<p><strong>Source:</strong> ${SOURCE_LABELS[source] || source}</p>`;
 
-      // HKL export (Tab 6): only offered when the reflections came out of a
+      // HKL export (Tab 7): only offered when the reflections came out of a
       // CIF — a raw SHELX .hkl is already in the right format. Written
       // untransformed; the embedded block is kept verbatim, a _refln loop is
       // re-written in SHELX format (3I4,2F8.2,I4).
@@ -1107,12 +1165,21 @@
            (see the Space Group tab); the data agree with it as well as with any of them.</p>`
         : tiedOpposite && selectionSource !== 'manual'
         ? (selectionSource === 'auto-e-stat'
-            ? `<p style="color:#080"><strong>✓ ${formatHM(top.hm)} was picked over the tied ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}) based on the E² statistics (tab 4)</strong> —
+            ? `<p style="color:#080"><strong>✓ ${formatHM(top.hm)} was picked over the tied ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}) based on the E² statistics (tab 5)</strong> —
                absences alone couldn't distinguish them (both ${(topScore * 100).toFixed(0)}%), but the intensity-distribution check can, and did.</p>`
             : `<p style="color:#b00"><strong>⚠ This is tied at ${(topScore * 100).toFixed(0)}% with ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}), which is ${topIsCentro ? 'acentric' : 'centrosymmetric'}
                where this one is ${topIsCentro ? 'centrosymmetric' : 'acentric'}.</strong> Systematic absences alone cannot break a centrosymmetric/acentric tie — Friedel's law makes both look
                identical in a diffraction pattern regardless of which one the crystal actually is. This is just the top-scoring row, not a real determination between the two — run
                <strong>Compute E² statistics</strong> on the Space Group tab, then select whichever row it points to.</p>`)
+        : '';
+
+      // Twinning found on the Twinning tab but not (all) written to this .ins
+      const findings = twinFindings() || [];
+      const written = twinForIns();
+      const notWritten = findings.filter(x => x.kind === 'law' ? !(written && written.matrix.flat().join(' ') !== '-1 0 0 0 -1 0 0 0 -1')
+        : !(written && (written.n === -4 || written.matrix.flat().join(' ') === '-1 0 0 0 -1 0 0 0 -1'))).filter(x => x.kind === 'law' || !hallSymbolIsCentrosymmetric(top.hall));
+      const twinInsNote = notWritten.length
+        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${notWritten.map(x => x.text).join(' · ')} — tick it on the <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">Twinning tab</a> to add TWIN/BASF.</p>`
         : '';
 
       const settingNote = settingTransform
@@ -1123,6 +1190,7 @@
         <h2>SHELX .ins (space group ${top.number}${top.qualifier ? ':' + top.qualifier : ''}, ${formatHM(top.hm)})</h2>
         <p><small>Kept in sync automatically with whichever candidate is selected on the Space Group tab — edit the cell/formula fields or the selection there and this updates on its own.</small></p>
         ${tieNote}
+        ${twinInsNote}
         ${settingNote}
         ${missingNote}
         ${zNote}
@@ -1132,7 +1200,7 @@
       insCopyNoteEl.textContent = '';
     }
 
-    // Tab 6: "Save as .hkl" block, visible only while lastHklExport is set.
+    // Tab 7: "Save as .hkl" block, visible only while lastHklExport is set.
     const hklSaveSectionEl = document.getElementById('hklSaveSection');
     const hklSaveInfoEl = document.getElementById('hklSaveInfo');
     const hklSaveBtn = document.getElementById('hklSaveBtn');

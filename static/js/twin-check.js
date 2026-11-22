@@ -213,11 +213,13 @@ function laueNameOfGroup(H) {
 function checkMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 'b', centering = 'P (primitive)') {
   const G = generateGroup(getLaueClassGenerators(laueClass, monoclinicAxis));
   const { H, folds } = latticeHolohedry(cell, centering, G);
+  const inLaue = new Set(G.map(twinMatrixKey));
+  const allFolds = lePageTwoFolds(cell, centering).map(f => ({ ...f, inLaue: inLaue.has(twinMatrixKey(f.R)), used: folds.includes(f) || folds.some(u => twinMatrixKey(u.R) === twinMatrixKey(f.R)) }));
   const maxFold = folds.length ? Math.max(...folds.map(f => f.delta)) : 0;
   const holoName = laueNameOfGroup(H);
   const holoNote = `Le Page search, obliquity δ ≤ ${LEPAGE_MAX_DELTA}°${folds.length ? `, largest used ${maxFold.toFixed(2)}°` : ''}`;
   if (H.length === G.length) {
-    return { applicable: false, laue: laueClass, holohedry: holoName, holohedryNote: holoNote,
+    return { applicable: false, laue: laueClass, holohedry: holoName, holohedryNote: holoNote, folds: allFolds,
       reason: `the lattice shows no symmetry beyond the Laue class ${laueClass} (Le Page search for 2-fold axes, obliquity ≤ ${LEPAGE_MAX_DELTA}°) — no (pseudo-)merohedral twin law` };
   }
   const foldByKey = new Map(folds.map(f => [twinMatrixKey(f.R), f]));
@@ -286,9 +288,10 @@ function checkMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 
       shelxMatrix: transpose3i(T), // SHELX TWIN / HKLF convention: h' = R h (column) — R = M^T
       deviation: fold ? { angle: fold.delta, length: 0, lePage: true } : twinMetricDeviation(cell, T),
       pairs: n, selection, meanH, alpha, alphaSe, verdict,
+      hValues: used, // for the cumulative N(H) plot
     };
   });
-  return { applicable: true, laue: laueClass, holohedry: holoName, holohedryNote: holoNote, laws };
+  return { applicable: true, laue: laueClass, holohedry: holoName, holohedryNote: holoNote, folds: allFolds, laws };
 }
 
 // Twin law in the transformed setting (HKLF matrix S: h_new = S h_old):

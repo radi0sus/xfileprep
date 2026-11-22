@@ -18,11 +18,13 @@
   <div class="tabBar" id="tabBar">
     <button class="tabBtn active" data-tab="tab-file">1. File &amp; Cell</button>
     <button class="tabBtn" data-tab="tab-laue">2. Laue Symmetry</button>
-    <button class="tabBtn" data-tab="tab-absences">3. Absences</button>
-    <button class="tabBtn" data-tab="tab-estat">4. E² Statistics</button>
-    <button class="tabBtn" data-tab="tab-spacegroup">5. Space Group</button>
-    <button class="tabBtn" data-tab="tab-ins">6. SHELX .ins and .hkl</button>
+    <button class="tabBtn" data-tab="tab-twin" id="twinTabBtn">3. Twinning</button>
+    <button class="tabBtn" data-tab="tab-absences">4. Absences</button>
+    <button class="tabBtn" data-tab="tab-estat">5. E² Statistics</button>
+    <button class="tabBtn" data-tab="tab-spacegroup">6. Space Group</button>
+    <button class="tabBtn" data-tab="tab-ins">7. SHELX .ins and .hkl</button>
   </div>
+  <div id="twinBanner" class="twinBanner" style="display:none;"></div>
 
   <div id="tab-file" class="tabPanel active">
     <div id="dropZone">
@@ -104,14 +106,17 @@
       <h2>Resolution shells (merging statistics)</h2>
       <p><small>Where do the data stop being useful? Information only — no cut-off is applied to the .ins or the .hkl.</small></p>
       <div id="shellStatsContainer"></div>
-
-      <h2>Twinning</h2>
-      <p><small>Twin laws beyond the Laue class: if the lattice has (pseudo-)symmetry beyond the Laue class — searched for 2-fold axes independent of the cell choice (Le Page) — the crystal can be twinned by the extra operations;
-        the H test (Yeates 1988) compares twin-related reflection pairs and estimates the twin fraction.
-        Inversion (racemic) twinning: compares the Bijvoet pairs I(h)/I(−h) with the anomalous signal expected from the composition.</small></p>
-      <div id="twinCheckContainer"></div>
     </div>
     <p id="laueVizEmpty"><small>Load reflection data and a cell to see the Laue overview.</small></p>
+  </div>
+
+  <div id="tab-twin" class="tabPanel">
+    <h2>Twinning</h2>
+    <p><small><strong>Twin laws beyond the Laue class:</strong> if the lattice has (pseudo-)symmetry beyond the Laue class — 2-fold axes searched independent of the cell choice (Le Page) —
+      the crystal can be twinned by the extra operations; the H test (Yeates 1988) compares twin-related reflection pairs and estimates the twin fraction.
+      <strong>Inversion (racemic) twinning:</strong> compares the Bijvoet pairs I(h)/I(−h) with the anomalous signal expected from the composition.
+      Nothing is written to the .ins unless you tick it below.</small></p>
+    <div id="twinCheckContainer"><p><small>Load reflection data and a cell to run the twin checks.</small></p></div>
   </div>
 
   <div id="tab-absences" class="tabPanel">
@@ -178,6 +183,7 @@
   <script src="static/js/shell-stats.js"></script>
   <script src="static/js/twin-check.js"></script>
   <script src="static/js/anomalous-check.js"></script>
+  <script src="static/js/twin-viz.js"></script>
   <script src="static/js/view-modal.js"></script>
   <script src="static/js/reflection-marks.js"></script>
   <script src="static/js/layer-viewer.js"></script>
