@@ -317,7 +317,7 @@
         const classification = classifyCellMetric(cell);
         const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
         const laue = determinedLaueClass || classification.laueClasses[0];
-        const res = checkMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis);
+        const res = checkMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis, observedCenteringName(cachedAbsenceScan().centering));
         lastTwinCheck = res;
         html += '<h3>Twin laws beyond the Laue class</h3>';
         if (!res.applicable) {
@@ -334,10 +334,10 @@
           }).join('');
           const best = res.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((x, y) => y.alpha - x.alpha)[0];
           html += `
-            <table class="shellTable"><thead><tr><th>Twin law (SHELX)</th><th title="Largest change of a cell parameter under the twin operation — 0 = exact merohedry">Metric deviation</th>
+            <table class="shellTable"><thead><tr><th>Twin law (SHELX)</th><th title="Le Page obliquity: angle between the lattice direction and the reciprocal-lattice normal of the 2-fold axis — 0 = exact (merohedry), small = pseudo-merohedry">Obliquity δ</th>
               <th title="Acentric twin-related pairs, I1+I2 > ${res.laws[0] ? res.laws[0].selection : 10}σ">Pairs</th><th title="Untwinned: 0.5, perfect twin: 0">⟨H⟩</th><th>Twin fraction α</th><th>Verdict</th></tr></thead>
               <tbody>${rows}</tbody></table>
-            <p><small>Laue class ${res.laue} in a ${res.holohedry} metric. α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
+            <p><small>Laue class ${res.laue}; lattice symmetry ${res.holohedry} (${res.holohedryNote}) — found from the lattice itself, independent of the cell choice. α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
               α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${res.holohedry} in the Laue table above.</small></p>
             ${best ? `<p><label><input type="checkbox" id="twinToIns" ${twinWriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${fmtM(best.shelxMatrix)}</code> with <code>BASF ${best.alpha.toFixed(2)}</code> to the .ins</span></label></p>` : ''}`;
         }

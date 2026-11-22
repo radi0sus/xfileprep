@@ -89,24 +89,138 @@ function twinMetricDeviation(cell, M) {
   return best;
 }
 
+// --- Lattice symmetry independent of the cell choice (Le Page 1982) -------
+// A lattice 2-fold axis is a direct lattice vector t (nearly) parallel to a
+// reciprocal lattice vector h; the angle between them (delta) is the
+// obliquity. Its matrix in the cell basis is R = 2 t h^T / (t.h) - I, which
+// must be integral and map the centring vectors onto lattice vectors. The
+// cell's own angles miss such pseudo-symmetry whenever the conventional cell
+// is not the one that shows it — nm56_25 (C 2/c, beta = 132.6 deg) has a
+// 2-fold along [001], perpendicular to (-1 0 1) within 0.012 deg: exactly its
+// refined TWIN -1 0 -2 0 -1 0 0 0 1.
+const CENTERING_VECTORS = {
+  'P (primitive)': [], A: [[0, 0.5, 0.5]], B: [[0.5, 0, 0.5]], C: [[0.5, 0.5, 0]], I: [[0.5, 0.5, 0.5]],
+  F: [[0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0]],
+  'R (obverse)': [[2 / 3, 1 / 3, 1 / 3], [1 / 3, 2 / 3, 2 / 3]], 'R (reverse)': [[1 / 3, 2 / 3, 1 / 3], [2 / 3, 1 / 3, 2 / 3]],
+};
+const LEPAGE_MAX_DELTA = 3; // degrees, as in Le Page's program and PLATON
+
+function lePageTwoFolds(cell, centering = 'P (primitive)', maxDelta = LEPAGE_MAX_DELTA, N = 2) {
+  const d2r = Math.PI / 180;
+  const { a, b, c } = cell;
+  const al = cell.alpha * d2r, be = cell.beta * d2r, ga = cell.gamma * d2r;
+  const cx = c * Math.cos(be), cy = c * (Math.cos(al) - Math.cos(be) * Math.cos(ga)) / Math.sin(ga);
+  const A = [[a, 0, 0], [b * Math.cos(ga), b * Math.sin(ga), 0], [cx, cy, Math.sqrt(Math.max(0, c * c - cx * cx - cy * cy))]];
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  const cross = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const V = dot(A[0], cross(A[1], A[2]));
+  const Rr = [cross(A[1], A[2]), cross(A[2], A[0]), cross(A[0], A[1])].map(v => v.map(x => x / V));
+  const cart = (t, B) => [0, 1, 2].map(j => t[0] * B[0][j] + t[1] * B[1][j] + t[2] * B[2][j]);
+  const cvecs = CENTERING_VECTORS[centering] || [];
+  const isLattice = v => [[0, 0, 0], ...cvecs].some(cv => v.every((x, i) => Math.abs(x - cv[i] - Math.round(x - cv[i])) < 1e-6));
+  const ts = [];
+  for (let u = -N; u <= N; u++) for (let v = -N; v <= N; v++) for (let w = -N; w <= N; w++) {
+    if (!u && !v && !w) continue;
+    ts.push([u, v, w]);
+    for (const cv of cvecs) ts.push([u + cv[0], v + cv[1], w + cv[2]]);
+  }
+  const found = new Map();
+  for (const t of ts) {
+    const tc = cart(t, A);
+    const tl = Math.sqrt(dot(tc, tc));
+    for (let h = -N; h <= N; h++) for (let k = -N; k <= N; k++) for (let l = -N; l <= N; l++) {
+      if (!h && !k && !l) continue;
+      const th = t[0] * h + t[1] * k + t[2] * l;
+      if (th <= 1e-9) continue;
+      const hc = cart([h, k, l], Rr);
+      const cos = dot(tc, hc) / (tl * Math.sqrt(dot(hc, hc)));
+      const delta = Math.acos(Math.min(1, cos)) / d2r;
+      if (delta > maxDelta) continue;
+      const hh = [h, k, l];
+      const Rf = [0, 1, 2].map(i => [0, 1, 2].map(j => 2 * t[i] * hh[j] / th - (i === j ? 1 : 0)));
+      if (!Rf.flat().every(x => Math.abs(x - Math.round(x)) < 1e-6)) continue;
+      const R = Rf.map(r => r.map(Math.round));
+      if (!cvecs.every(cv => isLattice([0, 1, 2].map(i => R[i][0] * cv[0] + R[i][1] * cv[1] + R[i][2] * cv[2])))) continue;
+      const key = twinMatrixKey(R);
+      if (!found.has(key) || found.get(key).delta > delta) found.set(key, { R, delta, t, h: hh });
+    }
+  }
+  return [...found.values()].sort((x, y) => x.delta - y.delta);
+}
+
+// Closure of a set of integer matrices (h' = h M); null if it exceeds 48
+// elements (inconsistent approximate axes).
+function closeMatrixGroup(gens) {
+  const out = new Map([['1,0,0;0,1,0;0,0,1', [[1, 0, 0], [0, 1, 0], [0, 0, 1]]]]);
+  for (const g of gens) out.set(twinMatrixKey(g), g);
+  let grown = true;
+  while (grown) {
+    grown = false;
+    for (const x of [...out.values()]) for (const y of [...out.values()]) {
+      const z = mul3i(x, y);
+      const k = twinMatrixKey(z);
+      if (!out.has(k)) { out.set(k, z); grown = true; if (out.size > 48) return null; }
+    }
+  }
+  return [...out.values()];
+}
+
+// Lattice holohedry from the Le Page 2-folds (smallest obliquity first, a
+// 2-fold is dropped if it would make the group inconsistent), plus the
+// inversion and the Laue group itself.
+function latticeHolohedry(cell, centering, laueGroup) {
+  const folds = lePageTwoFolds(cell, centering);
+  // For a 2-fold, x' = R x on coordinates and h' = h R^-1 = h R on indices: R serves directly.
+  let gens = [[[-1, 0, 0], [0, -1, 0], [0, 0, -1]], ...laueGroup];
+  let H = closeMatrixGroup(gens);
+  const used = [];
+  for (const f of folds) {
+    const trial = closeMatrixGroup([...gens, f.R]);
+    if (!trial) continue;
+    gens = [...gens, f.R];
+    H = trial;
+    used.push(f);
+  }
+  return { H, folds: used };
+}
+
+function isDiagonal3(M) {
+  return M[0][1] === 0 && M[0][2] === 0 && M[1][0] === 0 && M[1][2] === 0 && M[2][0] === 0 && M[2][1] === 0;
+}
+
+// Laue class of a holohedry group from its order and the highest order of a
+// proper rotation in it (4/m vs mmm, 6/m vs -3m, m-3 vs 6/mmm).
+function laueNameOfGroup(H) {
+  const id = '1,0,0;0,1,0;0,0,1';
+  const orderOf = M => { let X = M; for (let n = 1; n <= 6; n++) { if (twinMatrixKey(X) === id) return n; X = mul3i(X, M); } return 0; };
+  const maxProper = Math.max(...H.filter(M => det3i(M) === 1).map(orderOf));
+  const n = H.length;
+  if (n === 2) return '-1';
+  if (n === 4) return '2/m';
+  if (n === 6) return '-3';
+  if (n === 8) return maxProper === 4 ? '4/m' : 'mmm';
+  if (n === 12) return maxProper === 6 ? '6/m' : '-3m';
+  if (n === 16) return '4/mmm';
+  if (n === 24) return maxProper === 6 ? '6/mmm' : 'm-3';
+  if (n === 48) return 'm-3m';
+  return 'order ' + n;
+}
+
 // reflections: [{h,k,l,f2,sigma}] (lattice-absent ones may stay — they are
 // weak in both members of a pair and drop out of the sum selection).
+// centering: observed lattice centring name (absences.js), for the Le Page search.
 // Returns { applicable, reason?, laue, holohedry, laws: [...] }.
-function checkMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 'b') {
-  const classification = classifyCellMetric(cell);
-  const holoName = classification.laueClasses[0];
-  if (classification.system.includes('rhombohedral')) {
-    return { applicable: false, laue: laueClass, holohedry: holoName, reason: 'rhombohedral axes — twin laws are only derived for hexagonal axes' };
-  }
-  if (holoName === laueClass) {
-    return { applicable: false, laue: laueClass, holohedry: holoName, reason: `the Laue class ${laueClass} already has the full symmetry of the cell metric — no (pseudo-)merohedral twin law` };
-  }
+function checkMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 'b', centering = 'P (primitive)') {
   const G = generateGroup(getLaueClassGenerators(laueClass, monoclinicAxis));
-  const H = generateGroup(getLaueClassGenerators(holoName, monoclinicAxis));
-  const inH = new Set(H.map(twinMatrixKey));
-  if (!G.every(M => inH.has(twinMatrixKey(M)))) {
-    return { applicable: false, laue: laueClass, holohedry: holoName, reason: `${laueClass} (unique axis ${monoclinicAxis}) is not a subgroup of ${holoName} in this orientation` };
+  const { H, folds } = latticeHolohedry(cell, centering, G);
+  const maxFold = folds.length ? Math.max(...folds.map(f => f.delta)) : 0;
+  const holoName = laueNameOfGroup(H);
+  const holoNote = `Le Page search, obliquity δ ≤ ${LEPAGE_MAX_DELTA}°${folds.length ? `, largest used ${maxFold.toFixed(2)}°` : ''}`;
+  if (H.length === G.length) {
+    return { applicable: false, laue: laueClass, holohedry: holoName, holohedryNote: holoNote,
+      reason: `the lattice shows no symmetry beyond the Laue class ${laueClass} (Le Page search for 2-fold axes, obliquity ≤ ${LEPAGE_MAX_DELTA}°) — no (pseudo-)merohedral twin law` };
   }
+  const foldByKey = new Map(folds.map(f => [twinMatrixKey(f.R), f]));
 
   // merge under the Laue group (weighted mean)
   const merged = new Map();
@@ -124,7 +238,17 @@ function checkMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 
   const nonInversion = G.filter(M => twinMatrixKey(M) !== '-1,0,0;0,-1,0;0,0,-1');
   const isCentric = h => nonInversion.some(M => { const v = applyRow(h, M); return v[0] === -h[0] && v[1] === -h[1] && v[2] === -h[2]; });
 
-  const laws = twinLawCosets(H, G).map(T => {
+  // coset representative: the Le Page 2-fold with the smallest obliquity, if the coset has one
+  const reps = twinLawCosets(H, G).map(T => {
+    const coset = G.map(g => mul3i(g, T));
+    // smallest obliquity; on a tie (2-folds related by a Laue operation have the
+    // same delta) a 2-fold along c, then along any cell axis — as usually written
+    const pref = f => (isDiagonal3(f.R) ? (f.R[2][2] === 1 ? 0 : 1) : 2);
+    const best = coset.map(M => foldByKey.get(twinMatrixKey(M))).filter(Boolean)
+      .sort((x, y) => (Math.abs(x.delta - y.delta) > 1e-3 ? x.delta - y.delta : pref(x) - pref(y)))[0];
+    return best ? { T: best.R, fold: best } : { T, fold: null };
+  });
+  const laws = reps.map(({ T, fold }) => {
     const Hs = [];
     const seen = new Set();
     for (const [key, e] of merged) {
@@ -160,11 +284,11 @@ function checkMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 
     return {
       matrix: T, // index operation h' = h M
       shelxMatrix: transpose3i(T), // SHELX TWIN / HKLF convention: h' = R h (column) — R = M^T
-      deviation: twinMetricDeviation(cell, T),
+      deviation: fold ? { angle: fold.delta, length: 0, lePage: true } : twinMetricDeviation(cell, T),
       pairs: n, selection, meanH, alpha, alphaSe, verdict,
     };
   });
-  return { applicable: true, laue: laueClass, holohedry: holoName, laws };
+  return { applicable: true, laue: laueClass, holohedry: holoName, holohedryNote: holoNote, laws };
 }
 
 // Twin law in the transformed setting (HKLF matrix S: h_new = S h_old):
