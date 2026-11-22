@@ -308,54 +308,129 @@
     }
 
     function renderTwinCheckInner(el) {
+      lastAnomalousCheck = null;
       if (!lastReflections) { el.innerHTML = ''; return; }
       const cell = readCellOrNull();
       if (!cell) { el.innerHTML = '<p><small>Needs all six cell constants.</small></p>'; return; }
+      let html = '';
       try {
         const classification = classifyCellMetric(cell);
         const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
         const laue = determinedLaueClass || classification.laueClasses[0];
         const res = checkMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis);
         lastTwinCheck = res;
+        html += '<h3>Twin laws beyond the Laue class</h3>';
         if (!res.applicable) {
-          el.innerHTML = `<p><small>No twin law to test: ${res.reason}.</small></p>`;
-          if (lastMatchResults) generateIns();
-          return;
+          html += `<p><small>No twin law to test: ${res.reason}.</small></p>`;
+        } else {
+          const fmtM = M => M.flat().join(' ');
+          const rows = res.laws.map(L => {
+            const color = L.verdict === 'twinned' ? '#b60' : L.verdict.startsWith('perfect') ? '#b00' : '#080';
+            const dev = L.deviation ? `${L.deviation.angle.toFixed(2)}°${L.deviation.length > 0.0005 ? ` / ${(100 * L.deviation.length).toFixed(2)} %` : ''}` : '—';
+            return `<tr><td><code>TWIN ${fmtM(L.shelxMatrix)}</code></td><td>${dev}</td><td>${L.pairs}</td>
+              <td>${L.meanH === null ? '—' : L.meanH.toFixed(3)}</td>
+              <td>${L.alpha === null ? '—' : `${L.alpha.toFixed(2)} <small>± ${L.alphaSe.toFixed(3)}</small>`}</td>
+              <td style="color:${color}">${L.verdict}</td></tr>`;
+          }).join('');
+          const best = res.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((x, y) => y.alpha - x.alpha)[0];
+          html += `
+            <table class="shellTable"><thead><tr><th>Twin law (SHELX)</th><th title="Largest change of a cell parameter under the twin operation — 0 = exact merohedry">Metric deviation</th>
+              <th title="Acentric twin-related pairs, I1+I2 > ${res.laws[0] ? res.laws[0].selection : 10}σ">Pairs</th><th title="Untwinned: 0.5, perfect twin: 0">⟨H⟩</th><th>Twin fraction α</th><th>Verdict</th></tr></thead>
+              <tbody>${rows}</tbody></table>
+            <p><small>Laue class ${res.laue} in a ${res.holohedry} metric. α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
+              α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${res.holohedry} in the Laue table above.</small></p>
+            ${best ? `<p><label><input type="checkbox" id="twinToIns" ${twinWriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${fmtM(best.shelxMatrix)}</code> with <code>BASF ${best.alpha.toFixed(2)}</code> to the .ins</span></label></p>` : ''}`;
         }
-        const fmtM = M => M.flat().join(' ');
-        const rows = res.laws.map((L, i) => {
-          const color = L.verdict === 'twinned' ? '#b60' : L.verdict.startsWith('perfect') ? '#b00' : '#080';
-          const dev = L.deviation ? `${L.deviation.angle.toFixed(2)}°${L.deviation.length > 0.0005 ? ` / ${(100 * L.deviation.length).toFixed(2)} %` : ''}` : '—';
-          return `<tr><td><code>TWIN ${fmtM(L.shelxMatrix)}</code></td><td>${dev}</td><td>${L.pairs}</td>
-            <td>${L.meanH === null ? '—' : L.meanH.toFixed(3)}</td>
-            <td>${L.alpha === null ? '—' : `${L.alpha.toFixed(2)} <small>± ${L.alphaSe.toFixed(3)}</small>`}</td>
-            <td style="color:${color}">${L.verdict}</td></tr>`;
-        }).join('');
-        const best = res.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((a, b) => b.alpha - a.alpha)[0];
-        const top = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
-        const acentricNote = top && !hallSymbolIsCentrosymmetric(top.hall)
-          ? ` The selected space group ${formatHM(top.hm)} is acentric: inversion (racemic) twinning cannot be seen in the intensities — check the Flack parameter after refinement; combined with this law it becomes <code>TWIN … -4</code> with three BASF values.`
-          : '';
-        el.innerHTML = `
-          <table class="shellTable"><thead><tr><th>Twin law (SHELX)</th><th title="Largest change of a cell parameter under the twin operation — 0 = exact merohedry">Metric deviation</th>
-            <th title="Acentric twin-related pairs, I1+I2 > ${res.laws[0] ? res.laws[0].selection : 10}σ">Pairs</th><th title="Untwinned: 0.5, perfect twin: 0">⟨H⟩</th><th>Twin fraction α</th><th>Verdict</th></tr></thead>
-            <tbody>${rows}</tbody></table>
-          <p><small>Laue class ${res.laue} in a ${res.holohedry} metric. α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
-            α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${res.holohedry} in the Laue table above.${acentricNote}</small></p>
-          ${best ? `<p><label><input type="checkbox" id="twinToIns" ${twinWriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${fmtM(best.shelxMatrix)}</code> and <code>BASF ${best.alpha.toFixed(2)}</code> to the .ins</span></label></p>` : ''}`;
-        const cb = document.getElementById('twinToIns');
-        if (cb) cb.addEventListener('change', () => { twinWriteToIns = cb.checked; if (lastMatchResults) generateIns(); });
-        if (lastMatchResults) generateIns();
       } catch (err) {
-        el.innerHTML = `<p style="color:#b00"><small>Could not run the twin check: ${err.message}</small></p>`;
+        html += `<p style="color:#b00"><small>Could not run the twin-law check: ${err.message}</small></p>`;
       }
+      html += renderInversionTwinHtml(cell);
+      el.innerHTML = html;
+      const cb = document.getElementById('twinToIns');
+      if (cb) cb.addEventListener('change', () => { twinWriteToIns = cb.checked; if (lastMatchResults) generateIns(); });
+      const cbInv = document.getElementById('invTwinToIns');
+      if (cbInv) cbInv.addEventListener('change', () => { invTwinWriteToIns = cbInv.checked; if (lastMatchResults) generateIns(); });
+      if (lastMatchResults) generateIns();
     }
 
-    // The law the .ins should carry (checkbox ticked, a significant result), or null.
+    // Inversion (racemic) twinning from the Bijvoet pairs (anomalous-check.js).
+    // Needs an acentric point group to merge under: the selected candidate if
+    // acentric, else the best-scoring acentric one (e.g. P 21 when P 21/m is selected).
+    let lastAnomalousCheck = null;
+    let invTwinWriteToIns = false;
+    function renderInversionTwinHtml(cell) {
+      let html = '<h3>Inversion (racemic) twinning — Bijvoet pairs</h3>';
+      if (!lastMatchResults || !lastMatchResults.length) return html + '<p><small>Available once the space-group candidates are matched.</small></p>';
+      const sel = lastMatchResults[selectedCandidateIndex];
+      const acentric = r => !hallSymbolIsCentrosymmetric(r.entry.hall);
+      const ref = acentric(sel) ? sel
+        : (lastMatchResults.find(r => r.score === sel.score && acentric(r)) || lastMatchResults.find(acentric));
+      if (!ref) return html + '<p><small>No acentric candidate — inversion twinning does not apply.</small></p>';
+      try {
+        const ops = generateSpaceGroupOperators(ref.entry.hall);
+        const pointGroup = [...new Map(ops.map(o => [o.R.map(r => r.join(',')).join(';'), o.R])).values()];
+        const comp = getUnitCellComposition();
+        const res = checkAnomalousSignal(lastReflections, cell, pointGroup, lastFpp, comp ? comp.composition : null);
+        lastAnomalousCheck = res;
+        if (!res.enough) return html + `<p><small>Only ${res.pairs} Bijvoet pairs (Friedel mates measured separately) — not enough. Merged data with Friedel pairs averaged carry no anomalous information.</small></p>`;
+        const pgNote = ref === sel ? `point group of ${formatHM(ref.entry.hm)}` : `point group of the acentric candidate ${formatHM(ref.entry.hm)} (${formatHM(sel.entry.hm)} is centrosymmetric)`;
+        const sigmaNote = res.calibrated
+          ? (res.sigmaScale > 1.05 ? `σ scaled ×${Math.sqrt(res.sigmaScale).toFixed(2)} to match the scatter of repeated measurements` : 'σ consistent with repeated measurements')
+          : 'σ not calibrated (merged data)';
+        html += `<p>${res.pairs} Bijvoet pairs (${pgNote}; ${sigmaNote}).<br>
+          Observed anomalous signal: χ² = <strong>${res.chi2.toFixed(2)}</strong> <small>(1 = noise only)</small>`;
+        if (res.twin) {
+          const t = res.twin;
+          const color = t.verdict.startsWith('enantiopure') ? '#080' : t.verdict.startsWith('partial') ? '#b60' : t.verdict.startsWith('racemic') ? '#b00' : '#888';
+          html += ` · expected without inversion twinning: χ² ≈ ${t.expectedChi2.toFixed(1)}<br>
+            Estimated inversion-twin fraction: <strong>x ≈ ${t.x.toFixed(2)}</strong> <small>± ${t.xSe.toFixed(2)}</small> —
+            <span style="color:${color}">${t.verdict}</span></p>
+            <p><small>From observed/expected Bijvoet differences ≈ |1 − 2x| (f″ from the CIF, composition ${comp ? comp.source : ''}). Like the Flack parameter but without a model, so without sign:
+            x and 1 − x look the same, and a 50:50 racemic twin is indistinguishable from a centrosymmetric structure.
+            ${lastTwinCheck && lastTwinCheck.applicable && lastTwinCheck.laws.some(L => L.verdict === 'twinned') ? ' Combined with the twin law above the two effects mix — rough indication only.' : ''}
+            Refine the Flack parameter (or BASF) to get the real value.</small></p>`;
+          if (t.x >= 0.1 && t.expectedChi2 >= 1.5) {
+            html += ref === sel
+              ? `<p><label><input type="checkbox" id="invTwinToIns" ${invTwinWriteToIns ? 'checked' : ''}> <span>write the inversion twin (<code>TWIN</code>, <code>BASF ${t.x.toFixed(2)}</code>) to the .ins</span></label></p>`
+              : `<p><small>An inversion twin only exists for an acentric space group — select ${formatHM(ref.entry.hm)} on the Space Group tab to write it to the .ins.</small></p>`;
+          }
+        } else {
+          const why = !lastFpp ? 'no f″ values — they are read from a CIF (<code>_atom_type_scat_dispersion_imag</code>)'
+            : !comp ? 'no composition (formula + Z or a .ins)'
+            : `f″ missing for ${res.missingFpp.join(', ') || 'the anomalous scatterers'}`;
+          html += `</p><p><small>The expected signal cannot be computed (${why}), so a racemic twin cannot be told apart from a structure with only light atoms.
+            ${res.acentricEvidence === 'strong' ? 'The clear anomalous signal shows the structure is acentric and not a 50:50 racemic twin.' : ''}</small></p>`;
+        }
+        if (res.acentricEvidence === 'strong' && hallSymbolIsCentrosymmetric(sel.entry.hall)) {
+          html += `<p style="color:#b00"><strong>⚠ Friedel's law is clearly broken (χ² = ${res.chi2.toFixed(1)}), which no centrosymmetric structure can do — the selected ${formatHM(sel.entry.hm)} is probably wrong;
+            consider ${formatHM(ref.entry.hm)}.</strong> <small>(Unless absorption or scaling errors are large.)</small></p>`;
+        }
+      } catch (err) {
+        html += `<p style="color:#b00"><small>Could not run the Bijvoet check: ${err.message}</small></p>`;
+      }
+      return html;
+    }
+
+    // Twin instructions for the .ins (ticked boxes, significant results), or null:
+    // a twin law with BASF α, the inversion twin with BASF x, or both combined
+    // as TWIN R -4 with the three component fractions.
     function twinForIns() {
-      if (!twinWriteToIns || !lastTwinCheck || !lastTwinCheck.applicable) return null;
-      const best = lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((a, b) => b.alpha - a.alpha)[0];
-      return best ? { matrix: best.shelxMatrix, basf: best.alpha } : null;
+      let law = null, inv = null;
+      if (twinWriteToIns && lastTwinCheck && lastTwinCheck.applicable) {
+        const best = lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((x, y) => y.alpha - x.alpha)[0];
+        if (best) law = best;
+      }
+      const selEntry = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
+      if (invTwinWriteToIns && selEntry && !hallSymbolIsCentrosymmetric(selEntry.hall)
+          && lastAnomalousCheck && lastAnomalousCheck.twin && lastAnomalousCheck.twin.x >= 0.1) inv = lastAnomalousCheck.twin.x;
+      const minus1 = [[-1, 0, 0], [0, -1, 0], [0, 0, -1]];
+      if (law && inv !== null) {
+        const a = law.alpha, x = inv; // components: R (a(1-x)), -1 (x(1-a)), R·-1 (a·x)
+        return { matrix: law.shelxMatrix, n: -4, basf: [a * (1 - x), x * (1 - a), a * x] };
+      }
+      if (law) return { matrix: law.shelxMatrix, n: 2, basf: [law.alpha] };
+      if (inv !== null) return { matrix: minus1, n: 2, basf: [inv] };
+      return null;
     }
 
     function runAbsencesScan() {
@@ -491,7 +566,10 @@
     // Shared by both CIF-loading paths (a full CIF with reflections, and a
     // CIF with no reflection data at all — see handleFile) so cell/formula
     // get filled in identically either way.
+    let lastFpp = null; // f'' per element from the CIF atom-type loop (anomalous-check.js)
     function applyCellFromCIF(cell, text) {
+      const fpp = extractDispersionFromCIF(text);
+      if (fpp) lastFpp = fpp; // a reflection-only CIF without the loop keeps the earlier values
       lastCellExtras = cell;
       cellFields.a.value = cell.a;
       cellFields.b.value = cell.b;
@@ -1167,11 +1245,12 @@
         const topSignature = conditionSignature(results[0].entry.hall);
         const sameAbsences = results.filter(r => r.score === results[0].score && conditionSignature(r.entry.hall) === topSignature);
         const cifIndex = cifReportedCandidateIndex(results);
-        if (cifIndex > 0 && results[cifIndex].score === results[0].score) {
+        if (cifIndex >= 0 && results[cifIndex].score === results[0].score) { // also when it is already the top row: E² must not overturn it
           selectedCandidateIndex = cifIndex;
           selectionSource = 'cif';
         }
         generateIns(); // pre-populate the .ins tab with the top candidate right away
+        renderTwinCheck(); // the Bijvoet (inversion-twin) check needs the candidates
 
         const topTen = results.slice(0, 10);
         // The candidate list is ranked across ALL space-group numbers, so a
@@ -1276,7 +1355,7 @@
               ${sameAbsencesHasBoth ? 'The <strong>E² Statistics</strong> tab decides centrosymmetric vs. acentric; between the remaining ones' : 'Between them,'}
               only structure solution and refinement can decide (try each; check the result with ADDSYM in PLATON).
               ${cifRow ? `<br><strong>${formatHM(cifRow.entry.hm)} is preselected because the CIF reports it</strong> — the data agree with it equally well.` : ''}</p>`
-          : (cifRow ? `<p style="color:#069"><strong>${formatHM(cifRow.entry.hm)} is preselected because the CIF reports it</strong> — it scores as high as the top row.</p>` : '');
+          : (cifRow && selectedCandidateIndex > 0 ? `<p style="color:#069"><strong>${formatHM(cifRow.entry.hm)} is preselected because the CIF reports it</strong> — it scores as high as the top row.</p>` : '');
         const unresolvedHtml = unresolved.length
           ? `<p style="color:#b60"><strong>⚠ ${formatHM(results[0].entry.hm)} (${(topScore * 100).toFixed(1)}%) is not clearly separated from
               ${unresolved.map(r => `${formatHM(r.entry.hm)} (${(r.score * 100).toFixed(1)}%)`).join(', ')}</strong> — no check contradicts the runner-up
@@ -1425,13 +1504,20 @@
           const current = lastMatchResults[selectedCandidateIndex];
           const resolved = (current && tiedGroup.includes(current) && matchesVerdict(current)) ? current : tiedGroup.find(matchesVerdict);
           const wasActuallyTied = tiedGroup.some(m => !matchesVerdict(m));
-          if (resolved && wasActuallyTied) {
+          if (current && selectionSource === 'cif' && tiedGroup.includes(current) && !matchesVerdict(current) && wasActuallyTied) {
+            // The CIF names a refined space group; E² is a heuristic that
+            // pseudo-symmetry and heavy atoms mislead (nm75_26: P n a 21 with a
+            // pseudo n-glide reads "centrosymmetric"). Keep the CIF's pick and say so.
+            autoSelectNote = `<p style="color:#b60"><strong>E² points to a ${stats.verdict} structure, but the CIF reports ${formatHM(current.entry.hm)}</strong>
+              (${hallSymbolIsCentrosymmetric(current.entry.hall) ? 'centrosymmetric' : 'acentric'}) — the CIF's choice is kept. A refined structure outranks the intensity statistics,
+              which pseudo-symmetry, heavy atoms and twinning can mislead; select another row on the Space Group tab if you want to try it.</p>`;
+          } else if (resolved && wasActuallyTied) {
             const newIndex = lastMatchResults.indexOf(resolved);
             if (!(selectionSource === 'cif' && resolved === current)) selectionSource = 'auto-e-stat'; // this pick is now backed by E² statistics either way
             if (newIndex !== selectedCandidateIndex) {
               selectedCandidateIndex = newIndex;
               generateIns(); // rebuild the .ins for the now-resolved candidate right away
-            renderTwinCheck(); // its acentric/inversion-twin note depends on the selected space group
+              renderTwinCheck(); // its acentric/inversion-twin note depends on the selected space group
               const radio = document.querySelector(`input[name="candidateSelect"][value="${newIndex}"]`);
               if (radio) radio.checked = true;
               autoSelectNote = `<p style="color:#080"><strong>✓ Candidate selection updated on the Space Group tab:</strong> switched the space-group pick to

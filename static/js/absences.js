@@ -149,7 +149,7 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
     verdict = 'holds';
   }
 
-  return { verdict, reason, violationPercent, meanRatioPercent, medianISigma, forbiddenCount, allowedCount: allowed.count };
+  return { verdict, reason, violationPercent, meanRatioPercent, medianISigma, forbiddenCount, allowedCount: allowed.count, allowedPresentPercent };
 }
 
 // --- Lattice centering (whole dataset) ---------------------------------

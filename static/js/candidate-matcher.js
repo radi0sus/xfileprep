@@ -132,8 +132,16 @@ function scoreCandidate(hallSymbol, observedScan) {
   // check. Graduated credit means a candidate whose predictions are
   // mostly-but-not-perfectly clean is scored as mostly-but-not-perfectly
   // right, not as flatly wrong.
-  const matchFraction = (expectHolds, violationPercent) =>
-    expectHolds ? (100 - violationPercent) / 100 : violationPercent / 100;
+  // The violation percentage (share of forbidden reflections above 3 sigma) is
+  // compared with the share of ALLOWED reflections above 3 sigma: with weak data
+  // even a fully violated condition shows only that share. Raw, a 46 % violation
+  // (nm75_26, hk0 n-glide: forbidden reflections as strong as normal ones, the
+  // allowed class itself only ~50 % significant) gave the candidate predicting the
+  // glide 0.54 and the right one 0.46 — P n a n beat P n a 21.
+  const matchFraction = (expectHolds, violationPercent, allowedPresentPercent) => {
+    const v = allowedPresentPercent > 0 ? Math.min(100, (100 * violationPercent) / allowedPresentPercent) : violationPercent;
+    return expectHolds ? (100 - v) / 100 : v / 100;
+  };
 
   const observedCenteringForScore = observedCenteringName(observedScan.centering);
   const centeringResult = observedScan.centering[observedCenteringForScore];
@@ -174,7 +182,7 @@ function scoreCandidate(hallSymbol, observedScan) {
 
     checks.push({
       label: `${axis} period ${calcPeriod}`,
-      match: matchFraction(calcPeriod !== 1, reference.violationPercent),
+      match: matchFraction(calcPeriod !== 1, reference.violationPercent, reference.allowedPresentPercent),
       expectHolds: calcPeriod !== 1, verdict: reference.verdict, // kept for the UI: clear contradictions between candidates
       weight: reference.reflectionCount, // every period partitions the SAME reflection set on this axis, so the weight is period-independent
       axial: true, allowedCount: reference.allowedCount, forbiddenCount: reference.forbiddenCount,
@@ -195,7 +203,7 @@ function scoreCandidate(hallSymbol, observedScan) {
         if (!cond || cond.verdict === 'inconclusive') continue;
         checks.push({
           label: `${axis} period ${stricter.period} (stricter than the predicted ${calcPeriod})`,
-          match: matchFraction(false, cond.violationPercent),
+          match: matchFraction(false, cond.violationPercent, cond.allowedPresentPercent),
           expectHolds: false, verdict: cond.verdict,
           weight: stricter.reflectionCount,
           axial: true, allowedCount: cond.allowedCount, forbiddenCount: cond.forbiddenCount,
@@ -223,7 +231,7 @@ function scoreCandidate(hallSymbol, observedScan) {
       if ((zone === 'hhl' || cond.modulus === 4) && !expectHolds && observed.verdict === 'violated') continue;
       checks.push({
         label: `${zone} ${cond.name}`,
-        match: matchFraction(expectHolds, observed.violationPercent),
+        match: matchFraction(expectHolds, observed.violationPercent, observed.allowedPresentPercent),
         expectHolds, verdict: observed.verdict,
         weight: weightOf(observed),
       });

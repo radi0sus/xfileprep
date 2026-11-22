@@ -178,8 +178,11 @@ function generateInsFile(options) {
   // (h' = R h). With a setting change it is expressed in the new indices.
   if (twin && twin.matrix) {
     const R = settingTransform ? twinMatrixInSetting(twin.matrix, settingTransform.matrix) : twin.matrix;
-    lines.push(`TWIN ${R.flat().join(' ')}`);
-    lines.push(`BASF ${twin.basf.toFixed(2)}`);
+    const isInversion = R.flat().join(' ') === '-1 0 0 0 -1 0 0 0 -1';
+    const n = twin.n || 2;
+    // the inversion is SHELX's default TWIN matrix: plain "TWIN"
+    lines.push(isInversion && n === 2 ? 'TWIN' : `TWIN ${R.flat().join(' ')}${n !== 2 ? ' ' + n : ''}`);
+    lines.push(`BASF ${[].concat(twin.basf).map(v => v.toFixed(2)).join(' ')}`);
   }
 
   lines.push('TREF');
