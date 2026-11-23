@@ -107,8 +107,14 @@ function parseInsFile(text) {
 
   if (composition.length === 0) return null;
 
+  // SIZE dmin dmid dmax (crystal dimensions in mm, SHELXL)
+  const sizeLine = findInstructionLine(lines, 'SIZE');
+  const sizeParts = sizeLine ? sizeLine.split(/\s+/).map(Number) : [];
+  const size = sizeParts.length >= 3 && sizeParts.slice(0, 3).every(v => Number.isFinite(v) && v > 0) ? sizeParts.slice(0, 3) : null;
+
   return {
     cell: { a, b, c, alpha, beta, gamma },
+    size,
     wavelength: Number.isFinite(wavelength) && wavelength > 0 ? wavelength : null,
     z: Number.isFinite(z) ? z : null,
     composition,

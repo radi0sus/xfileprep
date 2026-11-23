@@ -56,6 +56,19 @@
           <td>c (Å)</td><td><input id="cellC" type="number" step="any"></td>
           <td>γ (°)</td><td><input id="cellGamma" type="number" step="any"></td>
         </tr>
+        <tr>
+          <td>λ (Å)</td>
+          <td colspan="3">
+            <select id="lambdaSelect">
+              <option value="Mo">Mo Kα 0.71073</option>
+              <option value="Cu">Cu Kα 1.54184</option>
+              <option value="Ag">Ag Kα 0.56087</option>
+              <option value="other">Other…</option>
+            </select>
+            <input id="lambdaCustom" type="number" step="any" placeholder="λ in Å" style="display:none">
+            <span id="lambdaSource" class="fieldSource"></span>
+          </td>
+        </tr>
       </table>
       <div id="cellEsd"></div>
       <p>
@@ -63,6 +76,19 @@
         <button id="applyFormulaBtn" type="button">Apply formula</button>
       </p>
       <div id="formulaUpdateNote"></div>
+      <div id="crystalDataSection">
+        <h2>Contents &amp; crystal data</h2>
+        <p class="crystalInputs">
+          <label><strong>Z:</strong> <input id="zInput" type="number" min="1" step="1"></label>
+          <span id="zSource" class="fieldSource"></span>
+          <span class="crystalSize"><strong>Crystal size (mm):</strong>
+            <input id="sizeD1" type="number" min="0" step="0.01" placeholder="d₁"> ×
+            <input id="sizeD2" type="number" min="0" step="0.01" placeholder="d₂"> ×
+            <input id="sizeD3" type="number" min="0" step="0.01" placeholder="d₃">
+            <small>(optional, for μ·r)</small> <span id="sizeSource" class="fieldSource"></span></span>
+        </p>
+        <div id="crystalDataResult"></div>
+      </div>
       <div id="cellNote"></div>
       <div id="cellExtra"></div>
       <div id="cellMetricResult"></div>
@@ -137,6 +163,7 @@
 
   <div id="tab-spacegroup" class="tabPanel">
     <div id="spaceGroupResult"></div>
+    <div id="zPrimeBox"></div>
   </div>
 
   <div id="tab-ins" class="tabPanel">
@@ -178,6 +205,8 @@
   <script src="static/js/ins-parser.js"></script>
   <script src="static/js/p4p-parser.js"></script>
   <script src="static/js/scattering-factors.js"></script>
+  <script src="static/js/absorption-data.js"></script>
+  <script src="static/js/crystal-data.js"></script>
   <script src="static/js/d-spacing.js"></script>
   <script src="static/js/e-statistics.js"></script>
   <script src="static/js/shell-stats.js"></script>

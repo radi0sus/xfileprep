@@ -119,7 +119,7 @@ function parseChemicalFormula(cifText) {
 // symmetry and atom coordinates ... must correspond to the indices after
 // transformation using this matrix").
 function generateInsFile(options) {
-  const { title, cell: rawCell, wavelength, hallSymbol, z, formula, composition, esd: rawEsd, settingTransform, twin } = options;
+  const { title, cell: rawCell, wavelength, hallSymbol, z, formula, composition, esd: rawEsd, settingTransform, twin, size } = options;
 
   if (settingTransform && determinant3(settingTransform.matrix) <= 0) {
     throw new Error('setting-transform: refusing to write an HKLF matrix with non-positive determinant');
@@ -172,6 +172,13 @@ function generateInsFile(options) {
   } else {
     lines.push('SFAC C H N O ! TODO: replace with the actual elements');
     lines.push('UNIT 1 1 1 1  ! TODO: replace with element counts x Z');
+  }
+
+  // Crystal dimensions (mm) for SHELXL: SIZE dmin dmid dmax — SHELXL copies
+  // them into the CIF (_exptl_crystal_size_*). Only when all three are known.
+  if (Array.isArray(size) && size.length === 3 && size.every(d => Number.isFinite(d) && d > 0)) {
+    const [dMin, dMid, dMax] = [...size].sort((x, y) => x - y);
+    lines.push(`SIZE ${dMin.toFixed(3)} ${dMid.toFixed(3)} ${dMax.toFixed(3)}`);
   }
 
   // Optional twin law from the twin check (Laue tab), in SHELX convention

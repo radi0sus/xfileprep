@@ -416,6 +416,28 @@
     // acentric, else the best-scoring acentric one (e.g. P 21 when P 21/m is selected).
     let lastAnomalousCheck = null;
     let invTwinWriteToIns = false;
+    // f″ for the Bijvoet check: values from a loaded CIF take priority (they
+    // belong to the refinement); elements the CIF does not list — or all of
+    // them, without a CIF — come from the FFAST table for the selected anode
+    // (Mo/Cu/Ag Kα). Returns {fpp: {El: f″} | null, source, note}.
+    function effectiveFpp(composition) {
+      const anode = anodeForWavelength(currentWavelength().value);
+      const fromCif = lastFpp ? { ...lastFpp } : null;
+      if (!anode) {
+        return fromCif
+          ? { fpp: fromCif, source: 'from the CIF' }
+          : { fpp: null, source: '', note: 'the wavelength is not Mo, Cu or Ag Kα' };
+      }
+      const fpp = fromCif || {};
+      const filled = [];
+      for (const c of composition || []) {
+        if (fpp[c.element] !== undefined) continue;
+        const info = elementInfo(c.element);
+        if (info && info.abs) { fpp[c.element] = info.abs[anode][1]; filled.push(c.element); }
+      }
+      if (!fromCif) return { fpp: filled.length ? fpp : null, source: `from NIST FFAST at ${anode} Kα`, note: filled.length ? '' : 'no composition yet' };
+      return { fpp, source: filled.length ? `from the CIF; ${filled.join(', ')} from NIST FFAST at ${anode} Kα` : 'from the CIF' };
+    }
     function renderInversionTwinHtml(cell) {
       let html = '<h3>Inversion (racemic) twinning — Bijvoet pairs</h3>';
       if (!lastMatchResults || !lastMatchResults.length) return html + '<p><small>Available once the space-group candidates are matched.</small></p>';
@@ -428,7 +450,8 @@
         const ops = generateSpaceGroupOperators(ref.entry.hall);
         const pointGroup = [...new Map(ops.map(o => [o.R.map(r => r.join(',')).join(';'), o.R])).values()];
         const comp = getUnitCellComposition();
-        const res = checkAnomalousSignal(lastReflections, cell, pointGroup, lastFpp, comp ? comp.composition : null);
+        const fppInfo = effectiveFpp(comp ? comp.composition : null);
+        const res = checkAnomalousSignal(lastReflections, cell, pointGroup, fppInfo.fpp, comp ? comp.composition : null);
         lastAnomalousCheck = res;
         if (!res.enough) return html + `<p><small>Only ${res.pairs} Bijvoet pairs (Friedel mates measured separately) — not enough. Merged data with Friedel pairs averaged carry no anomalous information.</small></p>`;
         const pgNote = ref === sel ? `point group of ${formatHM(ref.entry.hm)}` : `point group of the acentric candidate ${formatHM(ref.entry.hm)} (${formatHM(sel.entry.hm)} is centrosymmetric)`;
@@ -443,7 +466,7 @@
           html += ` · expected without inversion twinning: χ² ≈ ${t.expectedChi2.toFixed(1)}<br>
             Estimated inversion-twin fraction: <strong>x ≈ ${t.x.toFixed(2)}</strong> <small>± ${t.xSe.toFixed(2)}</small> —
             <span style="color:${color}">${t.verdict}</span></p>
-            <p><small>From observed/expected Bijvoet differences ≈ |1 − 2x| (f″ from the CIF, composition ${comp ? comp.source : ''}). Like the Flack parameter but without a model, so without sign:
+            <p><small>From observed/expected Bijvoet differences ≈ |1 − 2x| (f″ ${fppInfo.source}, composition ${comp ? comp.source : ''}). Like the Flack parameter but without a model, so without sign:
             x and 1 − x look the same, and a 50:50 racemic twin is indistinguishable from a centrosymmetric structure.
             ${lastTwinCheck && lastTwinCheck.applicable && lastTwinCheck.laws.some(L => L.verdict === 'twinned') ? ' Combined with the twin law above the two effects mix — rough indication only.' : ''}
             Refine the Flack parameter (or BASF) to get the real value.</small></p>`;
@@ -453,7 +476,7 @@
               : `<p><small>An inversion twin only exists for an acentric space group — select ${formatHM(ref.entry.hm)} on the Space Group tab to write it to the .ins.</small></p>`;
           }
         } else {
-          const why = !lastFpp ? 'no f″ values — they are read from a CIF (<code>_atom_type_scat_dispersion_imag</code>)'
+          const why = !fppInfo.fpp ? `no f″ values — they come from a CIF (<code>_atom_type_scat_dispersion_imag</code>) or, for Mo/Cu/Ag Kα, from the built-in table${fppInfo.note ? ` (${fppInfo.note})` : ''}`
             : !comp ? 'no composition (formula + Z or a .ins)'
             : `f″ missing for ${res.missingFpp.join(', ') || 'the anomalous scatterers'}`;
           html += `</p><p><small>The expected signal cannot be computed (${why}), so a racemic twin cannot be told apart from a structure with only light atoms.
@@ -565,8 +588,10 @@
       };
       if (!Object.values(values).every(Number.isFinite)) {
         cellMetricResultEl.innerHTML = '';
+        renderCrystalData();
         return;
       }
+      renderCrystalData();
       const classification = classifyCellMetric(values);
       cellMetricResultEl.innerHTML = `
         <h2>Cell metric symmetry</h2>
@@ -592,13 +617,251 @@
       let did = [];
       if (lastReflections && lastMatchResults) { runEStatistics(true); did.push('E² statistics'); }
       if (lastMatchResults) { generateIns(); did.push('the SHELX .ins'); } // formula/Z feeds directly into the .ins too, regardless of E-stat outcome
+      if (lastMatchResults) renderTwinCheck(); // the expected Bijvoet signal depends on the composition
       formulaUpdateNoteEl.innerHTML = did.length > 0
         ? `<p style="color:#080"><small>✓ Recalculated ${did.join(' and ')} with the current formula — check the corresponding tab.</small></p>`
         : `<p style="color:#b90"><small>No space-group match yet to recalculate — load reflection data first.</small></p>`;
     }
     formulaInput.addEventListener('change', applyFormulaChange);
     applyFormulaBtn.addEventListener('click', applyFormulaChange);
-    formulaInput.addEventListener('input', () => { formulaManuallyEdited = true; });
+    formulaInput.addEventListener('input', () => { formulaManuallyEdited = true; renderCrystalData(); });
+
+    // ---- Wavelength, Z, crystal size → "Contents & crystal data" ----------
+    // λ and Z used to live only in lastCellExtras (whatever the CIF/.ins/.p4p
+    // said); now they are visible, editable fields. A freshly loaded file that
+    // carries a value sets the field (like the formula field); a later file
+    // without one leaves it alone. With no λ from any file, Mo Kα is assumed
+    // and marked as such — the .ins tab says so too.
+    const lambdaSelect = document.getElementById('lambdaSelect');
+    const lambdaCustom = document.getElementById('lambdaCustom');
+    const lambdaSourceEl = document.getElementById('lambdaSource');
+    const zInput = document.getElementById('zInput');
+    const zSourceEl = document.getElementById('zSource');
+    const sizeInputs = ['sizeD1', 'sizeD2', 'sizeD3'].map(id => document.getElementById(id));
+    const sizeSourceEl = document.getElementById('sizeSource');
+    // Crystal size: CIF _exptl_crystal_size_max/mid/min or a SHELX SIZE line
+    // fill the three fields; editing any of them makes it "set by hand".
+    function setSizeFromFile(size, label) {
+      if (!size) return false;
+      const sorted = [...size].sort((x, y) => y - x); // largest first, as in the CIF
+      sizeInputs.forEach((inp, i) => { inp.value = sorted[i]; });
+      sizeSourceEl.textContent = `(from ${label})`;
+      return true;
+    }
+    function resetSize() {
+      sizeInputs.forEach(inp => { inp.value = ''; });
+      sizeSourceEl.textContent = '';
+    }
+    const crystalDataResultEl = document.getElementById('crystalDataResult');
+    const zPrimeBoxEl = document.getElementById('zPrimeBox');
+    let lambdaState = { source: 'assumed', label: null }; // source: 'file' | 'manual' | 'assumed'
+    let zState = { source: null, label: null };            // source: 'file' | 'manual' | null (empty → estimated)
+    // Same idea as formulaManuallyEdited: a Z typed by hand means formula × Z
+    // should win over an exact SFAC/UNIT composition from a loaded .ins.
+    let zManuallyEdited = false;
+
+    function renderLambdaSource() {
+      lambdaCustom.style.display = lambdaSelect.value === 'other' ? '' : 'none';
+      const s = lambdaState;
+      lambdaSourceEl.className = 'fieldSource' + (s.source === 'assumed' ? ' assumed' : '');
+      lambdaSourceEl.textContent = s.source === 'file' ? `(from ${s.label}${s.exactFor && s.exactFor !== 'other' && Math.abs(s.exact - ANODE_WAVELENGTHS[s.exactFor]) > 1e-6 ? `: ${s.exact} Å` : ''})`
+        : s.source === 'manual' ? '(set by hand)'
+        : 'assumed — no wavelength in the loaded files, please check';
+    }
+    function setWavelengthFromFile(lambda, label) {
+      if (!Number.isFinite(lambda) || lambda <= 0) return false;
+      const anode = anodeForWavelength(lambda);
+      lambdaSelect.value = anode || 'other';
+      lambdaCustom.value = anode ? '' : lambda;
+      // keep the file's exact value (e.g. 1.54178 from an older .ins) as long as
+      // the matching anode stays selected — the .ins then writes it unchanged
+      lambdaState = { source: 'file', label, exact: lambda, exactFor: lambdaSelect.value };
+      renderLambdaSource();
+      return true;
+    }
+    function resetWavelength() {
+      lambdaSelect.value = 'Mo';
+      lambdaCustom.value = '';
+      lambdaState = { source: 'assumed', label: null };
+      renderLambdaSource();
+    }
+    function currentWavelength() {
+      const keepExact = lambdaState.source === 'file' && lambdaState.exactFor === lambdaSelect.value && lambdaSelect.value !== 'other';
+      const v = keepExact ? lambdaState.exact
+        : lambdaSelect.value === 'other' ? parseFloat(lambdaCustom.value) : ANODE_WAVELENGTHS[lambdaSelect.value];
+      return { value: Number.isFinite(v) && v > 0 ? v : null, source: lambdaState.source };
+    }
+
+    function renderZSource() {
+      zSourceEl.textContent = zState.source === 'file' ? `(from ${zState.label})`
+        : zState.source === 'manual' ? '(set by hand)' : '';
+    }
+    function setZFromFile(z, label) {
+      if (!(z > 0)) return false;
+      zInput.value = z;
+      zState = { source: 'file', label };
+      zManuallyEdited = false;
+      renderZSource();
+      return true;
+    }
+    function resetZ() {
+      zInput.value = '';
+      zState = { source: null, label: null };
+      zManuallyEdited = false;
+      renderZSource();
+    }
+    function currentCellOrNull() {
+      const v = {
+        a: parseFloat(cellFields.a.value), b: parseFloat(cellFields.b.value), c: parseFloat(cellFields.c.value),
+        alpha: parseFloat(cellFields.alpha.value), beta: parseFloat(cellFields.beta.value), gamma: parseFloat(cellFields.gamma.value),
+      };
+      return Object.values(v).every(Number.isFinite) ? v : null;
+    }
+    // Z from the field, otherwise estimated from V / (18 Å³ × non-H atoms).
+    function currentZ(formula) {
+      const typed = parseFloat(zInput.value);
+      if (typed > 0) return { z: typed, estimated: false };
+      const cell = currentCellOrNull();
+      if (!cell || !formula || formula.length === 0) return { z: null, estimated: false };
+      const det = estimateZDetails(cellVolume(cell.a, cell.b, cell.c, cell.alpha, cell.beta, cell.gamma), formula);
+      return det ? { z: det.z, estimated: true } : { z: null, estimated: false };
+    }
+    // Exact SFAC/UNIT from a .ins wins until formula or Z are edited by hand.
+    function useExactComposition() {
+      return !!(lastInsComposition && lastInsComposition.length > 0 && !formulaManuallyEdited && !zManuallyEdited);
+    }
+
+    function fmtNum(x, digits) { return Number.isFinite(x) ? x.toFixed(digits) : '—'; }
+    function fmtFpp(x) { return x >= 1 ? x.toFixed(2) : x >= 0.01 ? x.toFixed(3) : x.toPrecision(2); }
+
+    // Z′ for the selected space-group candidate, or null.
+    function selectedZPrime(z) {
+      if (!z || !lastMatchResults || !lastMatchResults[selectedCandidateIndex]) return null;
+      const entry = lastMatchResults[selectedCandidateIndex].entry;
+      const info = zPrimeInfo(z, entry.hall);
+      return info ? { ...info, entry } : null;
+    }
+    function zPrimeText(zp) {
+      const val = Number.isInteger(zp.zPrime) ? zp.zPrime : (Math.abs(zp.zPrime * 4 - Math.round(zp.zPrime * 4)) < 1e-9 ? zp.zPrime.toString() : zp.zPrime.toFixed(3));
+      return `Z′ = ${val} in ${formatHM(zp.entry.hm)} (${zp.mult} general positions)`;
+    }
+
+    function renderCrystalData() {
+      const cell = currentCellOrNull();
+      const formula = parseFormulaString(formulaInput.value);
+      const zi = currentZ(formula);
+      const lam = currentWavelength();
+      zInput.placeholder = zi.estimated ? `≈ ${zi.z}` : '';
+      if (!cell) {
+        crystalDataResultEl.innerHTML = `<p><small>Enter or load the cell to see Z estimate, density, F(000) and μ.</small></p>`;
+        zPrimeBoxEl.innerHTML = '';
+        return;
+      }
+      const volume = cellVolume(cell.a, cell.b, cell.c, cell.alpha, cell.beta, cell.gamma);
+      const parts = [];
+
+      // Z estimate (always shown when a formula is there, also as a check of a given Z)
+      const det = formula.length > 0 ? estimateZDetails(volume, formula) : null;
+      if (det) {
+        const off = Math.abs(det.zRaw - det.z) > 0.25;
+        const given = parseFloat(zInput.value);
+        const disagree = given > 0 && Math.abs(given - det.zRaw) / det.zRaw > 0.3;
+        parts.push(`<p><small>Z estimate: V / 18 Å³ ≈ ${det.atomsPerCell.toFixed(1)} non-H atoms per cell; the formula has ${det.nonHPerUnit} →
+          Z ≈ ${det.zRaw.toFixed(2)} → <strong>${det.z}</strong>${off ? ' <span style="color:var(--warning)">(far from an integer — check the formula, or solvent/Z′)</span>' : ''}.
+          ${disagree ? `<span style="color:var(--warning)">The given Z = ${given} differs from this by more than 30 %.</span>` : ''}
+          Rule of thumb for organic/organometallic compounds; less reliable for inorganic or very dense structures.</small></p>`);
+      }
+
+      // Composition for density/F(000)/μ
+      let composition = null, compNote = '';
+      if (useExactComposition()) {
+        composition = lastInsComposition;
+        compNote = 'exact SFAC/UNIT from the .ins';
+      } else if (formula.length > 0 && zi.z) {
+        composition = formula.map(f => ({ element: f.element, count: f.count * zi.z }));
+        compNote = `formula × Z = ${zi.z}${zi.estimated ? ' (estimated)' : ''}`;
+      }
+      if (!composition) {
+        parts.push(`<p><small>Enter the chemical formula (and Z, or let it be estimated) for density, F(000) and μ.</small></p>`);
+        crystalDataResultEl.innerHTML = parts.join('');
+        renderZPrimeBox(zi);
+        return;
+      }
+
+      const size = sizeInputs.map(i => parseFloat(i.value));
+      const cd = computeCrystalData({ volume, composition, z: zi.z, formula, wavelength: lam.value, size });
+      if (cd && cd.unknown) {
+        parts.push(`<p style="color:var(--error)"><small>Unknown element symbol(s): ${cd.unknown.join(', ')} — no crystal data calculated.</small></p>`);
+        crystalDataResultEl.innerHTML = parts.join('');
+        renderZPrimeBox(zi);
+        return;
+      }
+
+      const rows = [];
+      rows.push(['Cell volume', `${volume.toFixed(1)} Å³`]);
+      rows.push(['Composition used', `${composition.map(c => c.element + (Number.isInteger(c.count) ? c.count : c.count.toFixed(2))).join(' ')} <small>(${compNote})</small>`]);
+      if (cd.formulaWeight) rows.push(['Formula weight', `${cd.formulaWeight.toFixed(2)} g/mol`]);
+      rows.push(['Density (calc.)', `${cd.density.toFixed(3)} g/cm³`]);
+      rows.push(['F(000)', `${Math.round(cd.f000)}`]);
+      const zp = selectedZPrime(zi.z);
+      if (zp) rows.push(['Z′', zPrimeText(zp).replace(/^Z′ = /, '')]);
+      if (cd.mu !== null) {
+        rows.push([`μ (${cd.anode} Kα)`, `${cd.mu.toFixed(3)} mm⁻¹`]);
+      } else {
+        rows.push(['μ', `<small>${lam.value ? `only for Mo, Cu and Ag Kα (λ = ${lam.value} Å has no tabulated values here)` : 'no wavelength'}</small>`]);
+      }
+      if (cd.absorption) {
+        const a = cd.absorption;
+        const advice = {
+          'negligible': 'negligible — an absorption correction changes little',
+          'moderate': 'moderate — a multi-scan correction (SADABS/SCALE3 ABSPACK) is usually enough',
+          'strong': 'strong — multi-scan needed; consider a numerical (face-indexed) correction',
+          'very strong': 'very strong — a numerical (face-indexed) correction is recommended, or a smaller crystal / shorter wavelength',
+        }[a.level];
+        rows.push(['μ·r (min / max)', `${a.muRMin.toFixed(2)} / ${a.muRMax.toFixed(2)} — <span class="absLevel ${a.level.replace(' ', '-')}">${advice}</span>`]);
+        rows.push(['T<sub>min</sub> / T<sub>max</sub> (expected)', `${a.tMin.toFixed(3)} / ${a.tMax.toFixed(3)} <small>(crude plate model, exp(−μ·d) along the longest / shortest edge)</small>`]);
+      }
+      const fpps = cd.perElement.filter(p => p.fpp !== null).sort((x, y) => y.fpp - x.fpp);
+      if (fpps.length > 0) {
+        rows.push([`f″ (${cd.anode} Kα)`, fpps.map(p => `${p.element} ${fmtFpp(p.fpp)}`).join(' · ')
+          + ` <small>— anomalous signal for the absolute structure${fpps[0].fpp < 0.1 ? '; very weak here (light atoms only) — the Flack parameter will be imprecise' + (cd.anode !== 'Cu' ? ', Cu Kα would help' : '') : ''}</small>`]);
+      }
+      parts.unshift(`<table class="crystalDataTable">${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`);
+      parts.push(`<p><small>μ/ρ and f″: NIST FFAST (Chantler et al., 2005), interpolated at the anode wavelength.</small></p>`);
+      crystalDataResultEl.innerHTML = parts.join('');
+      renderZPrimeBox(zi);
+    }
+
+    // Short Z′ line under the candidate table (Space Group tab).
+    function renderZPrimeBox(zi) {
+      const zp = selectedZPrime(zi.z);
+      if (!zp) { zPrimeBoxEl.innerHTML = ''; return; }
+      zPrimeBoxEl.innerHTML = `<p><strong>${zPrimeText(zp)}</strong> <small>for the selected row, with Z = ${zi.z}${zi.estimated ? ' (estimated — set Z on the File &amp; Cell tab)' : ''}.</small>
+        ${zp.note ? `<br><span style="color:var(--warning)"><small>${zp.note}</small></span>` : ''}</p>`;
+    }
+
+    lambdaSelect.addEventListener('change', () => {
+      lambdaState = { source: 'manual', label: null };
+      renderLambdaSource();
+      renderCrystalData();
+      if (lastMatchResults) { renderTwinCheck(); generateIns(); } // f″ for the Bijvoet check depends on the anode
+    });
+    lambdaCustom.addEventListener('input', () => { lambdaState = { source: 'manual', label: null }; renderLambdaSource(); renderCrystalData(); });
+    lambdaCustom.addEventListener('change', () => { if (lastMatchResults) { renderTwinCheck(); generateIns(); } });
+    zInput.addEventListener('input', () => {
+      zState = { source: zInput.value.trim() === '' ? null : 'manual', label: null };
+      zManuallyEdited = zInput.value.trim() !== '';
+      renderZSource();
+      renderCrystalData();
+    });
+    zInput.addEventListener('change', applyFormulaChange); // Z feeds E² composition, .ins UNIT and the Bijvoet expectation
+    sizeInputs.forEach(i => i.addEventListener('input', () => {
+      sizeSourceEl.textContent = sizeInputs.some(x => x.value.trim() !== '') ? '(set by hand)' : '';
+      renderCrystalData();
+    }));
+    sizeInputs.forEach(i => i.addEventListener('change', () => { if (lastMatchResults) generateIns(); })); // SIZE line in the .ins
+    renderLambdaSource();
+    renderCrystalData();
     const summaryEl = document.getElementById('summary');
     const warningsEl = document.getElementById('warnings');
 
@@ -647,6 +910,9 @@
       const formula = parseChemicalFormula(text);
       formulaInput.value = formula ? formula.map(f => f.element + f.count).join(' ') : '';
       formulaManuallyEdited = false; // fresh load
+      if (!setZFromFile(cell.z, 'CIF')) resetZ();
+      if (!setWavelengthFromFile(cell.wavelength, 'CIF')) resetWavelength();
+      if (!setSizeFromFile(cell.size, 'CIF')) resetSize();
       renderCellEsd(cell.esd);
     }
 
@@ -671,6 +937,9 @@
       lastInsComposition = insData.composition;
       lastCellExtras = { ...(lastCellExtras || {}), wavelength: insData.wavelength, z: insData.z, esd: insData.esd };
       formulaManuallyEdited = false; // fresh load — the exact composition above should win until the person edits it themselves
+      if (!setZFromFile(insData.z, '.ins')) resetZ();
+      if (!setWavelengthFromFile(insData.wavelength, '.ins')) resetWavelength();
+      if (!setSizeFromFile(insData.size, 'SIZE in the .ins/.res')) resetSize();
 
       // The formula field is documented as "per formula unit" — a loaded
       // .ins only gives the whole-cell composition (SFAC/UNIT) directly,
@@ -730,6 +999,7 @@
       lastInsComposition = null;
       formulaManuallyEdited = false; // fresh load
       lastCellExtras = { ...(lastCellExtras || {}), wavelength: p4pData.wavelength, z: lastCellExtras?.z ?? null };
+      setWavelengthFromFile(p4pData.wavelength, '.p4p');
 
       const extras = [];
       if (p4pData.wavelength !== null) extras.push(`λ = ${p4pData.wavelength} Å`);
@@ -884,6 +1154,10 @@
         cellExtraEl.innerHTML = '';
         formulaInput.value = '';
         formulaManuallyEdited = false; // fresh load
+        resetZ();
+        resetWavelength();
+        resetSize();
+        lastFpp = null; // f″ of an earlier CIF belong to another structure
         renderCellEsd(null);
       }
       updateCellMetricClassification();
@@ -1087,6 +1361,7 @@
     // button, so the .ins is always kept in sync with the current pick
     // rather than requiring a click to (re)generate it.
     function generateIns() {
+      renderCrystalData(); // Z′ depends on the selected candidate
       if (!lastMatchResults || lastMatchResults.length === 0) {
         insResultEl.innerHTML = '';
         insActionsEl.style.display = 'none';
@@ -1110,15 +1385,11 @@
         alpha: parseFloat(cellFields.alpha.value), beta: parseFloat(cellFields.beta.value), gamma: parseFloat(cellFields.gamma.value),
       };
       const formula = parseFormulaString(formulaInput.value);
-      const wavelength = lastCellExtras?.wavelength;
-      let z = lastCellExtras?.z;
-      let zWasEstimated = false;
-
-      if (!z && formula.length > 0) {
-        const volume = cellVolume(values.a, values.b, values.c, values.alpha, values.beta, values.gamma);
-        z = estimateZ(volume, formula);
-        zWasEstimated = z !== null;
-      }
+      const lam = currentWavelength();
+      const wavelength = lam.value;
+      const zi = currentZ(formula);
+      const z = zi.z;
+      const zWasEstimated = zi.estimated;
 
       // If the selected candidate isn't the one whose own systematic
       // absences the as-entered cell/hkl natively satisfy (see
@@ -1141,19 +1412,23 @@
         hallSymbol: top.hall,
         z,
         formula: formula.length > 0 ? formula : null,
-        composition: formulaManuallyEdited ? null : lastInsComposition, // exact whole-cell counts, if a .ins/.res was loaded — takes priority over formula×Z UNLESS the person has since typed their own formula
+        composition: useExactComposition() ? lastInsComposition : null, // exact whole-cell counts, if a .ins/.res was loaded — takes priority over formula×Z UNLESS the person has since typed their own formula or Z
         esd: lastCellEsd, // cell esds, if the source file provided them (CIF parens / .ins ZERR / .p4p CELLSD)
         settingTransform,
         twin: twinForIns(),
+        size: sizeInputs.map(i => parseFloat(i.value)),
       });
 
-      const hasComposition = (lastInsComposition && lastInsComposition.length > 0) || formula.length > 0;
+      const hasComposition = useExactComposition() || formula.length > 0;
       const missingParts = [!wavelength && 'wavelength', !hasComposition && 'chemical formula'].filter(Boolean);
+      const lambdaNote = wavelength && lam.source === 'assumed'
+        ? `<p style="color:#b90"><small>λ = ${wavelength} Å (Mo Kα) is assumed — none of the loaded files gives a wavelength. Set it on the File &amp; Cell tab if your data are not Mo.</small></p>`
+        : '';
       const missingNote = missingParts.length > 0
         ? `<p style="color:#b00"><small>Missing: ${missingParts.join(', ')} — placeholder(s) inserted, fill in manually before use.</small></p>`
         : '';
       const zNote = zWasEstimated
-        ? `<p style="color:#b90"><small>Z = ${z} was estimated from cell volume ÷ (~18 Å³ × non-H atoms) — a starting guess, not a measured value. Sanity-check it (Z is usually 1, 2, 3, 4, 6, or 8).</small></p>`
+        ? `<p style="color:#b90"><small>Z = ${z} was estimated from cell volume ÷ (~18 Å³ × non-H atoms) — a starting guess, not a measured value. Sanity-check it (Z is usually 1, 2, 3, 4, 6, or 8) and enter it on the File &amp; Cell tab.</small></p>`
         : '';
       // If the SELECTED candidate is tied with another that disagrees on
       // centrosymmetry, absences alone couldn't break that tie on their own.
@@ -1193,6 +1468,7 @@
         ${twinInsNote}
         ${settingNote}
         ${missingNote}
+        ${lambdaNote}
         ${zNote}
         <pre style="background:#f7f7f7; padding:0.8rem; border:1px solid #ddd; overflow-x:auto;">${ins}</pre>`;
       lastGeneratedIns = ins;
@@ -1473,24 +1749,13 @@
     // "chemical formula per formula unit" field × Z (same Z logic already
     // used for .ins generation above — reused rather than re-estimated).
     function getUnitCellComposition() {
-      if (lastInsComposition && !formulaManuallyEdited) {
+      if (useExactComposition()) {
         return { composition: lastInsComposition, source: 'exact — SFAC/UNIT from the loaded .ins' };
       }
       const formula = parseFormulaString(formulaInput.value);
       if (formula.length === 0) return null;
 
-      let z = lastCellExtras?.z;
-      let zWasEstimated = false;
-      if (!z) {
-        const values = {
-          a: parseFloat(cellFields.a.value), b: parseFloat(cellFields.b.value), c: parseFloat(cellFields.c.value),
-          alpha: parseFloat(cellFields.alpha.value), beta: parseFloat(cellFields.beta.value), gamma: parseFloat(cellFields.gamma.value),
-        };
-        if (!Object.values(values).every(Number.isFinite)) return null;
-        const volume = cellVolume(values.a, values.b, values.c, values.alpha, values.beta, values.gamma);
-        z = estimateZ(volume, formula);
-        zWasEstimated = z !== null;
-      }
+      const { z, estimated: zWasEstimated } = currentZ(formula);
       if (!z) return null;
 
       return {

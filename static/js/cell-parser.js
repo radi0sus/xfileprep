@@ -88,6 +88,10 @@ function extractCellFromCIF(cifText) {
   const volume = parseCIFNumber(extractCIFTagValue(cifText, '_cell_volume'));
   const z = parseCIFNumber(extractCIFTagValue(cifText, '_cell_formula_units_Z'));
   const wavelength = parseCIFNumber(extractCIFTagValue(cifText, '_diffrn_radiation_wavelength'));
+  // crystal dimensions in mm (all three, or none)
+  const sizeVals = ['_exptl_crystal_size_max', '_exptl_crystal_size_mid', '_exptl_crystal_size_min']
+    .map(tag => parseCIFNumber(extractCIFTagValue(cifText, tag)));
+  const size = sizeVals.every(v => Number.isFinite(v) && v > 0) ? sizeVals : null;
 
   // Keep CIF space-group metadata as an independent Laue-class source.
   // CIF versions use several common tag aliases for H-M and Hall symbols.
@@ -113,6 +117,7 @@ function extractCellFromCIF(cifText) {
     volume: Number.isFinite(volume) ? volume : null,
     z: Number.isFinite(z) ? z : null,
     wavelength: Number.isFinite(wavelength) ? wavelength : null,
+    size,
     reportedSpaceGroup: reportedSpaceGroup || null,
     reportedHallSymbol: reportedHallSymbol || null,
     reportedSpaceGroupNumber: Number.isFinite(reportedSpaceGroupNumber) ? reportedSpaceGroupNumber : null,
