@@ -806,7 +806,7 @@
       const zp = selectedZPrime(zi.z);
       if (zp) rows.push(['Z′', zPrimeText(zp).replace(/^Z′ = /, '')]);
       if (cd.mu !== null) {
-        rows.push([`μ (${cd.anode} Kα)`, `${cd.mu.toFixed(3)} mm⁻¹`]);
+        rows.push([`μ (${cd.anode} Kα)`, `${cd.mu.toFixed(3)} mm⁻¹ <small>(NIST FFAST; SHELXL uses International Tables Vol. C and may differ by ~1 %)</small>`]);
       } else {
         rows.push(['μ', `<small>${lam.value ? `only for Mo, Cu and Ag Kα (λ = ${lam.value} Å has no tabulated values here)` : 'no wavelength'}</small>`]);
       }
@@ -819,7 +819,7 @@
           'very strong': 'very strong — a numerical (face-indexed) correction is recommended, or a smaller crystal / shorter wavelength',
         }[a.level];
         rows.push(['μ·r (min / max)', `${a.muRMin.toFixed(2)} / ${a.muRMax.toFixed(2)} — <span class="absLevel ${a.level.replace(' ', '-')}">${advice}</span>`]);
-        rows.push(['T<sub>min</sub> / T<sub>max</sub> (expected)', `${a.tMin.toFixed(3)} / ${a.tMax.toFixed(3)} <small>(crude plate model, exp(−μ·d) along the longest / shortest edge)</small>`]);
+        rows.push(['T<sub>min</sub> / T<sub>max</sub> (expected)', `${a.tMin.toFixed(3)} / ${a.tMax.toFixed(3)} <small>(exp(−μ·d<sub>max</sub>) / exp(−μ·d<sub>min</sub>) — the outer limits, as checkCIF's T<sub>min</sub>′ / T<sub>max</sub>; a real correction usually gives a somewhat higher T<sub>min</sub>)</small>`]);
       }
       const fpps = cd.perElement.filter(p => p.fpp !== null).sort((x, y) => y.fpp - x.fpp);
       if (fpps.length > 0) {
