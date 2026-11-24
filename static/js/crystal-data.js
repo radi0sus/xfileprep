@@ -84,6 +84,9 @@ function computeCrystalData({ volume, composition, z, formula, wavelength, size 
   const unknown = [];
   let massCell = 0, electrons = 0;
   const anode = anodeForWavelength(wavelength);
+  // f″ as SHELXL uses it: International Tables Vol. C Table 4.2.6.8 at the
+  // ten tabulated lines (dispersion-table.js); NIST FFAST only as fallback.
+  const ita = typeof dispersionForWavelength === 'function' && wavelength ? dispersionForWavelength(wavelength) : null;
   let muSum = 0; // Σ n·A·(μ/ρ)
   let muComplete = !!anode;
   const perElement = [];
@@ -95,7 +98,9 @@ function computeCrystalData({ volume, composition, z, formula, wavelength, size 
     const ab = anode && info.abs ? info.abs[anode] : null;
     if (anode && !ab) muComplete = false;
     if (ab) muSum += c.count * info.mass * ab[0];
-    perElement.push({ element: c.element, count: c.count, muRho: ab ? ab[0] : null, fpp: ab ? ab[1] : null });
+    const fppIta = ita && ita.fpp[c.element] !== undefined ? ita.fpp[c.element] : null;
+    perElement.push({ element: c.element, count: c.count, muRho: ab ? ab[0] : null,
+      fpp: fppIta !== null ? fppIta : (ab ? ab[1] : null), fppSource: fppIta !== null ? 'ITA' : (ab ? 'FFAST' : null) });
   }
   if (unknown.length > 0) return { unknown, volume };
 
@@ -125,5 +130,5 @@ function computeCrystalData({ volume, composition, z, formula, wavelength, size 
     absorption = { dMin, dMax, muRMin, muRMax, tMin: Math.exp(-mu * dMax), tMax: Math.exp(-mu * dMin), level };
   }
 
-  return { volume, massCell, formulaWeight: fw, density, f000: electrons, anode, mu, perElement, absorption };
+  return { volume, massCell, formulaWeight: fw, density, f000: electrons, anode, fppLine: ita ? ita.line : (anode ? `${anode} Kα` : null), mu, perElement, absorption };
 }

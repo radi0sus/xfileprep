@@ -70,9 +70,9 @@ function sgdPointGroup(ops) {
   const sys = sgdCrystalSystem(ops);
   const hasInv = ops.some(op => [0, 1, 2].every(i => op.R[i][i] === -1));
   const nRot = new Set(ops.filter(op => [0, 1, 2].filter(i => op.R[i][i] === -1).length === 2).map(op => [0, 1, 2].findIndex(i => op.R[i][i] === 1))).size;
-  if (sys === 'triclinic') return hasInv ? '<span class="sgdBar">1</span>' : '1';
-  if (sys === 'monoclinic') return hasInv ? '2/m' : nRot ? '2' : 'm';
-  return hasInv ? 'mmm' : nRot === 3 ? '222' : 'mm2';
+  if (sys === 'triclinic') return formatPG(hasInv ? '-1' : '1');
+  if (sys === 'monoclinic') return formatPG(hasInv ? '2/m' : nRot ? '2' : 'm');
+  return formatPG(hasInv ? 'mmm' : nRot === 3 ? '222' : 'mm2');
 }
 
 // Short H-M symbol from the (full-ish) table entry: drop the "1" place
@@ -82,7 +82,7 @@ function sgdShortSymbol(hm) {
   const parts = base.split(/\s+/);
   const lattice = parts.shift();
   const rest = parts.length === 3 && parts.filter(p => p === '1').length === 2 ? parts.filter(p => p !== '1') : parts;
-  return lattice + rest.join('').replace(/([2346])([1-5])/g, (m, a, b) => a + '₀₁₂₃₄₅'[b]).replace(/-([1-6])/g, '<span class="sgdBar">$1</span>');
+  return formatSG(lattice + rest.join('')); // sg-format.js
 }
 
 // --- symmetry elements ------------------------------------------------------
@@ -247,7 +247,7 @@ function renderSpaceGroupDiagram(container, entry, cell) {
   let ops;
   try { ops = generateSpaceGroupOperators(entry.hall); } catch (e) { container.innerHTML = ''; return; }
   const short = sgdShortSymbol(entry.hm);
-  const fullHM = entry.hm.replace(/:.*$/, '').replace(/([2346])([1-5])/g, (m, a, b) => a + '₀₁₂₃₄₅'[b]).replace(/-([1-6])/g, '<span class="sgdBar">$1</span>');
+  const fullHM = formatSG(entry.hm.replace(/:.*$/, ''));
   if (!sgdIsSupported(ops)) {
     container.innerHTML = `<div class="sgdBox"><div class="sgdTitle"><span class="sgdShort">${short}</span> <span class="sgdNo">No. ${entry.number}</span></div>
       <p><small>The diagram is drawn for triclinic, monoclinic and orthorhombic space groups only.</small></p></div>`;

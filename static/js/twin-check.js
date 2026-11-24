@@ -220,7 +220,7 @@ function checkMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 
   const holoNote = `Le Page search, obliquity δ ≤ ${LEPAGE_MAX_DELTA}°${folds.length ? `, largest used ${maxFold.toFixed(2)}°` : ''}`;
   if (H.length === G.length) {
     return { applicable: false, laue: laueClass, holohedry: holoName, holohedryNote: holoNote, folds: allFolds,
-      reason: `the lattice shows no symmetry beyond the Laue class ${laueClass} (Le Page search for 2-fold axes, obliquity ≤ ${LEPAGE_MAX_DELTA}°) — no (pseudo-)merohedral twin law` };
+      reason: `the lattice shows no symmetry beyond the Laue class ${typeof formatPG === 'function' ? formatPG(laueClass) : laueClass} (Le Page search for 2-fold axes, obliquity ≤ ${LEPAGE_MAX_DELTA}°) — no (pseudo-)merohedral twin law` };
   }
   const foldByKey = new Map(folds.map(f => [twinMatrixKey(f.R), f]));
 

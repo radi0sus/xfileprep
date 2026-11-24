@@ -526,3 +526,10 @@ svg.sgDiagram { width: 100%; max-width: 520px; height: auto; display: block; fon
 .sgDiagram .sgdEl:hover .sgdPlane, .sgDiagram .sgdEl:hover .sgdAxisArrow, .sgDiagram .sgdEl:hover .sgdCorner { stroke: var(--accent); }
 .sgDiagram .sgdEl:hover .sgdLens, .sgDiagram .sgdEl:hover .sgdArrowHead { fill: var(--accent); stroke: var(--accent); }
 .sgDiagram .sgdEl:hover .sgdHook, .sgDiagram .sgdEl:hover .sgdInv, .sgDiagram .sgdEl:hover .sgdCornerArrow { stroke: var(--accent); }
+
+/* space-group / point-group symbols (sg-format.js): ITA style —
+   letters italic, digits upright, screw axes subscript, bar over the digit */
+.sgSym { font-style: normal; white-space: nowrap; }
+.sgSym i { font-style: italic; }
+.sgSym sub { font-size: 0.72em; vertical-align: -0.25em; line-height: 0; }
+.sgBar { text-decoration: overline; }

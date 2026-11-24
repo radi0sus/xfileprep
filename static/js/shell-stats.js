@@ -214,7 +214,7 @@ function renderShellStatistics(container, stats, info) {
     ? `<p style="color:#a60;"><small>⚠ No repeated observations: R values are undefined (data already merged to a unique set).</small></p>` : '';
 
   container.innerHTML = `
-    <p><small>Merged under Laue class ${info.laue}${info.source === 'cif' ? ' (from the CIF space group)' : info.source === 'merging' ? ' (confirmed by merging)' : ' (assumed — highest-symmetry candidate for this cell, not confirmed)'}; ${info.lattice}.
+    <p><small>Merged under Laue class ${formatPG(info.laue)}${info.source === 'cif' ? ' (from the CIF space group)' : info.source === 'merging' ? ' (confirmed by merging)' : ' (assumed — highest-symmetry candidate for this cell, not confirmed)'}; ${info.lattice}.
       Shells have equal width in d*³ (the same number of possible unique reflections each), from low to high resolution.
       Where the mean intensity approaches zero the R values grow without limit — use ⟨I/σ⟩ there.</small></p>
     <table class="shellTable">

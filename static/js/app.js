@@ -67,14 +67,10 @@
     renderLoadedFiles();
     let lastLoadedFileBaseName = null; // filename (no extension) of whichever file was loaded most recently, used as a TITL prefix
 
-    // Renders screw-axis notation (21, 31, 32, 41, 42, 43, 61-65) with a
-    // proper Unicode subscript for display, e.g. "P 1 21 1" -> "P 1 2₁ 1".
-    // Only for on-screen text — the SHELX .ins TITL line deliberately keeps
-    // plain ASCII digits for maximum compatibility with older software.
-    const SUBSCRIPT_DIGITS = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉' };
-    const SCREW_AXIS_TOKENS = /\b(21|31|32|41|42|43|61|62|63|64|65)\b/g;
+    // H-M symbol for display (HTML). The SHELX .ins TITL line and all file
+    // contents keep the plain ASCII symbol with spaces.
     function formatHM(hm) {
-      return hm.replace(SCREW_AXIS_TOKENS, m => m[0] + m.slice(1).split('').map(d => SUBSCRIPT_DIGITS[d]).join(''));
+      return formatSG(hm); // sg-format.js: italic letters, upright digits, 2₁, bars
     }
 
     // Purely informational note for the Space Group candidate table: does
@@ -150,12 +146,12 @@
       if (isIdentity3(matrix)) {
         // Origin choice 1 vs 2 (F d -3 m, P n n n, I 41/a m d, ...): the same
         // lattice and indexing, only the origin of the symmetry operators moves.
-        return `<span style="color:#888" title="Differs from ${formatHM(native.hm)} only by an origin shift: same cell, same hkl, no HKLF matrix. The .ins gets this row's symmetry operators directly.">matches as measured <small>(other origin choice)</small></span>`;
+        return `<span style="color:#888" title="Differs from ${formatSGText(native.hm)} only by an origin shift: same cell, same hkl, no HKLF matrix. The .ins gets this row's symmetry operators directly.">matches as measured <small>(other origin choice)</small></span>`;
       }
       const esdNote = isPurePermutation(matrix)
         ? ''
         : '<br><small style="color:#b90">⚠ cell-choice shear — esds not recalculated</small>';
-      return `<span style="color:#069" title="Your cell/hkl as measured natively match ${formatHM(native.hm)}. To use this row (${formatHM(entry.hm)}) instead, transform with this matrix.">as measured (${formatHM(native.hm)}) → <strong>${formatHM(entry.hm)}</strong><br><code style="font-size:0.85em">${formatHKLFMatrix(matrix)}</code>${esdNote}${obliquenessNote(entry, matrix, cell)}</span>`;
+      return `<span style="color:#069" title="Your cell/hkl as measured natively match ${formatSGText(native.hm)}. To use this row (${formatSGText(entry.hm)}) instead, transform with this matrix.">as measured (${formatHM(native.hm)}) → <strong>${formatHM(entry.hm)}</strong><br><code style="font-size:0.85em">${formatHKLFMatrix(matrix)}</code>${esdNote}${obliquenessNote(entry, matrix, cell)}</span>`;
     }
 
     const absencesResultEl = document.getElementById('absencesResult');
@@ -217,6 +213,41 @@
       renderShellStats();
       renderTwinCheck();
       renderLayerViewer();
+    }
+
+    // Pseudo-translations (pseudo-translation.js): classes that are weak but
+    // present. Computed once per data set, relative to the observed lattice.
+    let _ptCache = { reflections: null, info: null };
+    function pseudoTranslationInfo() {
+      if (!lastReflections) return null;
+      if (_ptCache.reflections !== lastReflections) {
+        let info = null;
+        try {
+          const centName = observedCenteringName(cachedAbsenceScan().centering);
+          const lat = filterByLattice(lastReflections, centName[0]);
+          info = { ...detectPseudoTranslations(lastReflections, lat.test), lattice: centName };
+        } catch (err) { info = null; }
+        _ptCache = { reflections: lastReflections, info };
+      }
+      return _ptCache.info;
+    }
+    const ptLabel = label => label.replace(/^pseudo-([A-Z])/, 'pseudo-<i>$1</i>').replace(/^([abc])\/(\d)/, '<i>$1</i>/$2');
+    const ptRatioText = st => `${(100 * pseudoTranslationRatio(st)).toFixed(0)} %`;
+    // "pseudo-I, t = (½, ½, ½): h+k+l odd at 25 % of the rest"
+    function pseudoTranslationSummary(info) {
+      return info.strongFound.map(f => `${ptLabel(f.label)}, t = ${f.vector}: ${f.cond}${f.aliases.length ? ` (= ${f.aliases.map(a => a.cond).join(' = ')})` : ''} at ${ptRatioText(f.stats)} of the rest`).join('; ');
+    }
+
+    // Short warning for the E² and Twinning tabs; '' if nothing strong was found.
+    function pseudoTranslationWarning(where) {
+      const info = pseudoTranslationInfo();
+      if (!info || !info.strongFound.length) return '';
+      const what = pseudoTranslationSummary(info);
+      if (where === 'e2') return `<p style="color:#b60"><strong>⚠ Pseudo-translation</strong> (Absences tab: ${what}).
+        Two intensity populations — a strong and a weak class — widen the E² distribution and raise ⟨|E²−1|⟩: a "centrosymmetric" verdict below is
+        weak evidence here, an "acentric" one still holds. (Normalising the two classes separately was tried and dropped: it turned centrosymmetric test structures acentric.)</p>`;
+      return `<p style="color:#b60"><small><strong>⚠ Pseudo-translation in the data</strong> (${what}, see the Absences tab). Pseudo-symmetry makes twin-related intensities
+        similar even without a twin, so α of the H test can be too high — above all for a law that is a symmetry operation of the pseudo-cell. Refine BASF and judge by the refinement.</small></p>`;
     }
 
     // Drops the reflections that the OBSERVED lattice centering forbids (zero by
@@ -387,7 +418,7 @@
         const folds = res.folds || [];
         html += `<h3>Lattice symmetry (Le Page)</h3>
           <p><small>2-fold axes of the lattice, found independent of the cell choice: a lattice direction [uvw] (nearly) perpendicular to a lattice plane (hkl);
-            the obliquity δ is the angle between them. Laue class ${res.laue}; lattice symmetry <strong>${res.holohedry}</strong> (${res.holohedryNote}).</small></p>`;
+            the obliquity δ is the angle between them. Laue class ${formatPG(res.laue)}; lattice symmetry <strong>${formatPG(res.holohedry)}</strong> (${res.holohedryNote}).</small></p>`;
         html += folds.length
           ? `<table class="shellTable"><thead><tr><th>Axis [uvw]</th><th>⊥ plane (hkl)</th><th>Obliquity δ</th><th>In the Laue class?</th></tr></thead><tbody>${
               folds.map(f => `<tr><td>[${reducedDirection(f.t).join(' ')}]</td><td>(${reducedDirection(f.h).join(' ')})</td><td>${f.delta.toFixed(3)}°</td>
@@ -412,7 +443,8 @@
               <th title="Acentric twin-related pairs, I1+I2 > ${res.laws[0] ? res.laws[0].selection : 10}σ">Pairs</th><th title="Untwinned: 0.5, perfect twin: 0">⟨H⟩</th><th>Twin fraction α</th><th>Verdict</th></tr></thead>
               <tbody>${rows}</tbody></table>
             <p><small>α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
-              α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${res.holohedry} on the Laue tab.</small></p>
+              α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${formatPG(res.holohedry)} on the Laue tab.</small></p>
+            ${pseudoTranslationWarning('twin')}
             <div id="nhPlotContainer"></div>
             <p><small>N(H): straight lines are ideal twins with fraction α; an observed curve that bends away from them points to pseudo-symmetry rather than a clean twin.</small></p>
             ${best ? `<p style="color:#b60"><small>Twinning narrows the intensity distribution, so the centrosymmetric/acentric verdict on the E² tab is unreliable for this data set.</small></p>` : ''}
@@ -458,6 +490,7 @@
             direct row and about the reciprocal row. Pseudo-symmetry makes intensities similar at any distance, a twin only where the spots overlap — untwinned test data stay at α ≈ 0.</small></p>
           <table class="shellTable"><thead><tr><th>Twin law</th><th>Obliquity δ</th><th>Matrix h′ = M h (rows)</th><th title="Reflections whose twin image lies within the overlap tolerance">Overlapping</th>
             <th title="Overlapping pairs with both partners measured, I1+I2 > 10σ">Pairs</th><th>Fraction α (overlaps)</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>`;
+          html += pseudoTranslationWarning('twin');
         if (res.laws.some(L => L.verdict.startsWith('twinned'))) {
           html += `<p style="color:#b60"><small><strong>A non-merohedral twin needs an HKLF 5 reflection file</strong> (each overlapping reflection with both components), e.g. from PLATON (TwinRotMat, after a first refinement)
             or TWINABS. A TWIN instruction with a rounded matrix in HKLF 4 mode would treat every reflection as overlapped — wrong at higher angle — so the .ins gets nothing from here.
@@ -479,22 +512,27 @@
     // them, without a CIF — come from the FFAST table for the selected anode
     // (Mo/Cu/Ag Kα). Returns {fpp: {El: f″} | null, source, note}.
     function effectiveFpp(composition) {
-      const anode = anodeForWavelength(currentWavelength().value);
+      const lambda = currentWavelength().value;
+      const ita = typeof dispersionForWavelength === 'function' ? dispersionForWavelength(lambda) : null;
+      const anode = anodeForWavelength(lambda);
       const fromCif = lastFpp ? { ...lastFpp } : null;
-      if (!anode) {
-        return fromCif
-          ? { fpp: fromCif, source: 'from the CIF' }
-          : { fpp: null, source: '', note: 'the wavelength is not Mo, Cu or Ag Kα' };
-      }
       const fpp = fromCif || {};
-      const filled = [];
+      const fromIta = [], fromFfast = [];
       for (const c of composition || []) {
         if (fpp[c.element] !== undefined) continue;
+        if (ita && ita.fpp[c.element] !== undefined) { fpp[c.element] = ita.fpp[c.element]; fromIta.push(c.element); continue; }
         const info = elementInfo(c.element);
-        if (info && info.abs) { fpp[c.element] = info.abs[anode][1]; filled.push(c.element); }
+        if (anode && info && info.abs) { fpp[c.element] = info.abs[anode][1]; fromFfast.push(c.element); }
       }
-      if (!fromCif) return { fpp: filled.length ? fpp : null, source: `from NIST FFAST at ${anode} Kα`, note: filled.length ? '' : 'no composition yet' };
-      return { fpp, source: filled.length ? `from the CIF; ${filled.join(', ')} from NIST FFAST at ${anode} Kα` : 'from the CIF' };
+      const parts = [];
+      if (fromCif) parts.push('from the CIF');
+      if (fromIta.length) parts.push(`${fromCif ? fromIta.join(', ') + ' ' : ''}from ITA Vol. C Table 4.2.6.8 at ${ita.line} (${ita.wavelength} Å)`);
+      if (fromFfast.length) parts.push(`${fromCif || fromIta.length ? fromFfast.join(', ') + ' ' : ''}from NIST FFAST at ${anode} Kα`);
+      const any = fromCif || fromIta.length || fromFfast.length;
+      let note = '';
+      if (!any) note = !(composition && composition.length) ? 'no composition yet'
+        : 'the wavelength is none of the tabulated lines (Ti, Cr, Fe, Co, Cu, Mo, Ag, W, Au, U Kα)';
+      return { fpp: any ? fpp : null, source: parts.join('; '), note };
     }
     function renderInversionTwinHtml(cell) {
       let html = '<h3>Inversion (racemic) twinning — Bijvoet pairs</h3>';
@@ -534,7 +572,7 @@
               : `<p><small>An inversion twin only exists for an acentric space group — select ${formatHM(ref.entry.hm)} on the Space Group tab to write it to the .ins.</small></p>`;
           }
         } else {
-          const why = !fppInfo.fpp ? `no f″ values — they come from a CIF (<code>_atom_type_scat_dispersion_imag</code>) or, for Mo/Cu/Ag Kα, from the built-in table${fppInfo.note ? ` (${fppInfo.note})` : ''}`
+          const why = !fppInfo.fpp ? `no f″ values — they come from a CIF (<code>_atom_type_scat_dispersion_imag</code>) or, for Ti, Cr, Fe, Co, Cu, Mo, Ag, W, Au and U Kα, from the built-in table (ITA Vol. C 4.2.6.8)${fppInfo.note ? ` (${fppInfo.note})` : ''}`
             : !comp ? 'no composition (formula + Z or a .ins)'
             : `f″ missing for ${res.missingFpp.join(', ') || 'the anomalous scatterers'}`;
           html += `</p><p><small>The expected signal cannot be computed (${why}), so a racemic twin cannot be told apart from a structure with only light atoms.
@@ -570,6 +608,41 @@
       if (law) return { matrix: law.shelxMatrix, n: 2, basf: [law.alpha] };
       if (inv !== null) return { matrix: minus1, n: 2, basf: [inv] };
       return null;
+    }
+
+    // Absences tab: classes that are weak but present (pseudo-translation).
+    function pseudoTranslationSectionHtml() {
+      const info = pseudoTranslationInfo();
+      if (!info) return '';
+      const VERDICT = {
+        'pseudo-translation': ['#b60', 'pseudo-translation'],
+        'weak hint': ['#888', 'weak hint'],
+        'absent': ['#069', 'absent — the cell may be too large (true sub-cell), or a centring not yet recognised'],
+      };
+      const shown = info.table.filter(t => VERDICT[t.verdict]).sort((a, b) => pseudoTranslationRatio(a.stats) - pseudoTranslationRatio(b.stats));
+      const latNote = info.lattice && info.lattice[0] !== 'P' ? ` Reflections forbidden by the observed ${info.lattice} lattice are left out.` : '';
+      const head = `<h3>Pseudo-translations (classes that are weak, but present)</h3>`;
+      const explain = `<details class="explain"><summary>How to read this</summary><p><small>If most of the structure repeats with a translation t that is not a lattice vector,
+        the reflections with h·t non-integral are systematically weak, but not absent. Shown: mean (and median) intensity of that class relative to the rest,
+        and the share with I/σ ≥ 3 in both. ≤ 50 %: pseudo-translation; 50–75 %: weak hint; near 0 with hardly any significant ones: a real absence.
+        Reflections with a zero index are left out, so glide planes and screw axes cannot fake a weak class.${latNote}
+        Why it matters: with short exposures the weak class looks absent (wrong centred or smaller cell, wrong Z); two intensity populations make E² look
+        more centrosymmetric; pseudo-symmetry raises the twin fraction of the H test; solution and refinement find the averaged sub-structure first
+        and show strong correlations. Measure the weak class well.</small></p></details>`;
+      if (!shown.length) return head + `<p><small>None — no class is markedly weaker than the rest (all ratios above 75 %, ${info.nUsed} reflections without a zero index).</small></p>` + explain;
+      const rows = shown.map(t => {
+        const [col, txt] = VERDICT[t.verdict];
+        const alias = t.aliases.length ? `<br><small>= ${t.aliases.map(a => a.cond).join(' = ')}</small>` : '';
+        return `<tr><td>${ptLabel(t.label)}</td><td>${t.vector}</td><td>${t.cond}${alias}</td><td>${t.stats.nWeak} / ${t.stats.nRest}</td>
+          <td><strong>${(100 * t.stats.ratio).toFixed(0)} %</strong> / ${(100 * t.stats.medianRatio).toFixed(0)} %</td>
+          <td>${(100 * t.stats.strongWeak).toFixed(0)} % / ${(100 * t.stats.strongRest).toFixed(0)} %</td><td style="color:${col}">${txt}</td></tr>`;
+      }).join('');
+      const summary = info.strongFound.length
+        ? `<p style="color:#b60"><strong>⚠ Pseudo-translation:</strong> ${pseudoTranslationSummary(info)}.
+            The weak class is present, so the cell and lattice found above are right; but the E² verdict and the twin fraction are affected (notes on those tabs).</p>`
+        : '';
+      return head + `<table><tr><th>Type</th><th>Translation t</th><th>Weak class</th><th>N weak / rest</th><th>⟨I⟩ weak/rest (mean / median)</th><th>I/σ ≥ 3 weak / rest</th><th>Verdict</th></tr>${rows}</table>`
+        + summary + explain;
     }
 
     function runAbsencesScan() {
@@ -612,7 +685,7 @@
             relevance = conditionsRelevantForLaue(relLaue, cls.system.includes('c-unique') ? 'c' : 'b');
           }
         } catch (err) { relevance = null; }
-        const pseudoNote = `<br><small style="color:#b90" title="Holds in the data, but no space group of Laue class ${relLaue} has this condition: an approximate (pseudo-)symmetry of the structure, not a systematic absence. These reflections are not treated as forbidden.">pseudo-symmetry — impossible in Laue class ${relLaue}</small>`;
+        const pseudoNote = `<br><small style="color:#b90" title="Holds in the data, but no space group of Laue class ${formatPGText(relLaue)} has this condition: an approximate (pseudo-)symmetry of the structure, not a systematic absence. These reflections are not treated as forbidden.">pseudo-symmetry — impossible in Laue class ${formatPG(relLaue)}</small>`;
         const zonalRows = Object.entries(scan.zonal).flatMap(([zone, results]) =>
           results.map((r, i) => `<tr><td>${i === 0 ? (zone === 'hhl' ? 'hhl (diagonal plane)' : zone) : ''}</td><td>${i === 0 ? r.reflectionCount : ''}</td><td>${r.name}${
             relevance && r.verdict === 'holds' && !relevance.zonal[zone][i] ? pseudoNote : ''}</td>${verdictCell(r)}</tr>`)
@@ -623,6 +696,8 @@
 
           <h3>Lattice centering (whole dataset, ${lastReflections.length} reflections)</h3>
           <table><tr><th>Type</th><th>Condition</th><th>Status</th></tr>${centeringRows}</table>
+
+          ${pseudoTranslationSectionHtml()}
 
           <h3>Axial conditions (screw axes)</h3>
           <table>
@@ -683,7 +758,7 @@
       cellMetricResultEl.innerHTML = `
         <h2>Cell metric symmetry</h2>
         <p><strong>Crystal system:</strong> ${classification.system}</p>
-        <p><strong>Laue class candidates:</strong> ${classification.laueClasses.join(', ')}</p>
+        <p><strong>Laue class candidates:</strong> ${classification.laueClasses.map(formatPG).join(', ')}</p>
         <p><small>Based on cell metric only — the actual Laue class still needs to be confirmed by comparing merging statistics for each candidate (next step).</small></p>`;
     }
     Object.values(cellFields).forEach(field => field.addEventListener('input', updateCellMetricClassification));
@@ -910,11 +985,12 @@
       }
       const fpps = cd.perElement.filter(p => p.fpp !== null).sort((x, y) => y.fpp - x.fpp);
       if (fpps.length > 0) {
-        rows.push([`f″ (${cd.anode} Kα)`, fpps.map(p => `${p.element} ${fmtFpp(p.fpp)}`).join(' · ')
-          + ` <small>— anomalous signal for the absolute structure${fpps[0].fpp < 0.1 ? '; very weak here (light atoms only) — the Flack parameter will be imprecise' + (cd.anode !== 'Cu' ? ', Cu Kα would help' : '') : ''}</small>`]);
+        rows.push([`f″ (${cd.fppLine})`, fpps.map(p => `${p.element} ${fmtFpp(p.fpp)}`).join(' · ')
+          + ` <small>— anomalous signal for the absolute structure${fpps[0].fpp < 0.1 ? '; very weak here (light atoms only) — the Flack parameter will be imprecise' + (cd.fppLine !== 'Cu Kα' ? ', Cu Kα would help' : '') : ''}</small>`]);
       }
       parts.unshift(`<table class="crystalDataTable">${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`);
-      parts.push(`<p><small>μ/ρ and f″: NIST FFAST (Chantler et al., 2005), interpolated at the anode wavelength.</small></p>`);
+      const fppSrc = new Set(cd.perElement.map(p => p.fppSource).filter(Boolean));
+      parts.push(`<p><small>μ/ρ: NIST FFAST (Chantler et al., 2005), interpolated at the anode wavelength. f″: ${fppSrc.has('ITA') ? 'International Tables Vol. C, Table 4.2.6.8 (the values SHELXL uses)' : ''}${fppSrc.has('ITA') && fppSrc.has('FFAST') ? '; elements missing there from ' : ''}${fppSrc.has('FFAST') ? 'NIST FFAST' : ''}.</small></p>`);
       crystalDataResultEl.innerHTML = parts.join('');
       renderZPrimeBox(zi);
     }
@@ -990,7 +1066,7 @@
       const extras = [];
       if (cell.z !== null) extras.push(`Z = ${cell.z}`);
       if (cell.wavelength !== null) extras.push(`λ = ${cell.wavelength} Å`);
-      if (cell.reportedSpaceGroup !== null) extras.push(`reported space group: ${cell.reportedSpaceGroup}`);
+      if (cell.reportedSpaceGroup !== null) extras.push(`reported space group: ${formatSG(cell.reportedSpaceGroup)}`);
       if (cell.reportedHallSymbol !== null) extras.push(`Hall: ${cell.reportedHallSymbol}`);
       cellExtraEl.innerHTML = extras.length > 0 ? `<p>${extras.join(' · ')}</p>` : '';
 
@@ -1394,7 +1470,7 @@
 
         const rows = evaluations.map(r => `
           <tr ${r.laueClass === chosen ? 'style="font-weight:bold;background:#f3fbf6;"' : ''}>
-            <td>${r.laueClass}${r.laueClass === chosen ? ' ✓' : ''}</td>
+            <td>${formatPG(r.laueClass)}${r.laueClass === chosen ? ' ✓' : ''}</td>
             <td>${r.groupOrder}</td>
             <td>${r.uniqueReflections}</td>
             <td>${r.redundancy.toFixed(2)}</td>
@@ -1406,7 +1482,7 @@
           : '';
 
         const verdictBlock = cifLaueClass
-          ? `<p><strong>Laue class from CIF space group: ${chosen}</strong> — ${lastCellExtras.reportedSpaceGroup || `space-group #${lastCellExtras.reportedSpaceGroupNumber}`} (${lastCellExtras.reportedHallSymbol || 'Hall symbol unavailable'}). The R<sub>int</sub> table is shown as an independent check; merged/refinement HKL may not contain redundancy to redetermine the class.</p>
+          ? `<p><strong>Laue class from CIF space group: ${formatPG(chosen)}</strong> — ${lastCellExtras.reportedSpaceGroup ? formatSG(lastCellExtras.reportedSpaceGroup) : `space-group #${lastCellExtras.reportedSpaceGroupNumber}`} (${lastCellExtras.reportedHallSymbol || 'Hall symbol unavailable'}). The R<sub>int</sub> table is shown as an independent check; merged/refinement HKL may not contain redundancy to redetermine the class.</p>
              ${jumpNote}`
           : redundancyInformative
           ? `<p><strong>Auto-picked: ${chosen}</strong> — highest symmetry candidate with no R<sub>int</sub> jump from the baseline.</p>
@@ -1673,7 +1749,7 @@
         const results = matchSpaceGroupCandidates(HALL_SYMBOLS_TABLE, targetLaueClass, scan, { monoclinicAxis });
 
         if (results.length === 0) {
-          spaceGroupResultEl.innerHTML = `<p style="color:#b00">No candidates found for Laue class ${targetLaueClass} with the observed centering. Double-check the Laue class table above — the true Laue class may be lower symmetry than assumed here.</p>`;
+          spaceGroupResultEl.innerHTML = `<p style="color:#b00">No candidates found for Laue class ${formatPG(targetLaueClass)} with the observed centering. Double-check the Laue class table above — the true Laue class may be lower symmetry than assumed here.</p>`;
           resolve(false);
           return;
         }
@@ -1805,13 +1881,13 @@
               ${unresolved.map(r => `${formatHM(r.entry.hm)} (${(r.score * 100).toFixed(1)}%)`).join(', ')}</strong> — no check contradicts the runner-up
               <small>(within 1.5 points, and none of the differing conditions is clearly held or clearly violated).
               Typical causes: weak data, pseudo-symmetry (a weak pseudo-centering, a glide plane that is only partly obeyed), a condition this scan does not cover, or an
-              enantiomorphic pair (P 4₁ / P 4₃ …) that absences can never tell apart. Look at the layer viewer (Laue tab) and the zone plots (Absences tab), and treat the top row
+              enantiomorphic pair (${formatSG("P 41")} / ${formatSG("P 43")} …) that absences can never tell apart. Look at the layer viewer (Laue tab) and the zone plots (Absences tab), and treat the top row
               as a proposal — the refinement (R1, Flack parameter, ADDSYM in PLATON) has the last word.</small></p>`
           : '';
 
         spaceGroupResultEl.innerHTML = `
           <h2>Space group candidates</h2>
-          <p><small>Assumed Laue class: ${targetLaueClass} (${laueClassNote})</small></p>
+          <p><small>Assumed Laue class: ${formatPG(targetLaueClass)} (${laueClassNote})</small></p>
           ${tieWarning}
           ${sameAbsencesHtml}
           ${unresolvedHtml}
@@ -1995,7 +2071,7 @@
 
         eStatResultEl.innerHTML = `
           <h2>E² statistics (Wilson plot)</h2>
-          <p><small>Composition: ${compInfo.source} · merged under Laue class ${targetLaueClass}${determinedLaueClassSource === 'merging' ? '' : determinedLaueClassSource === 'cif' ? ' (from the CIF space group)' : ' (assumed, not yet confirmed above)'}
+          <p><small>Composition: ${compInfo.source} · merged under Laue class ${formatPG(targetLaueClass)}${determinedLaueClassSource === 'merging' ? '' : determinedLaueClassSource === 'cif' ? ' (from the CIF space group)' : ' (assumed, not yet confirmed above)'}
           · ${stats.uniqueReflections} unique reflections (${stats.usableReflections} usable)<br>${latticeInfo.note}</small></p>
           <table>
             <tr><th></th><th>this data</th><th>ref. centrosymmetric</th><th>ref. acentric</th></tr>
@@ -2004,6 +2080,7 @@
             <tr><td>fraction |E|&gt;3</td><td>${(stats.fractionEgt3 * 100).toFixed(3)}%</td><td>${(ref.centrosymmetric.fractionEgt3 * 100).toFixed(2)}%</td><td>${(ref.acentric.fractionEgt3 * 100).toFixed(2)}%</td></tr>
             <tr><td>&lt;E²&gt;</td><td>${stats.meanE2.toFixed(3)}</td><td colspan="2"><small>should be ≈1.000 if the Wilson scaling fit well</small></td></tr>
           </table>
+          ${pseudoTranslationWarning('e2')}
           <p style="color:${verdictColor}"><strong>Best match: ${stats.verdict}</strong> <small>(margin ${(stats.margin * 100).toFixed(0)}% between the two reference distances — near 0% means right on the fence)</small></p>
           ${autoSelectNote}
           <p><small>Wilson fit: B = ${stats.B.toFixed(2)} Å² (overall isotropic falloff), scale k = ${stats.k.toFixed(3)}.</small></p>

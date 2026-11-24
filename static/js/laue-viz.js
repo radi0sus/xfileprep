@@ -132,7 +132,7 @@ function renderLaueOverview(containerEl, noteEl, reflections, cell, laueClass, l
   for (const r of reflections) seen.add(r.h + ',' + r.k + ',' + r.l);
   const redundancy = reflections.length / Math.max(1, seen.size);
   let note = laueClass
-    ? `<p>Laue class ${laueSource === 'cif' ? 'from the CIF space group' : 'from merging'}: <strong>${laueClass}</strong></p>`
+    ? `<p>Laue class ${laueSource === 'cif' ? 'from the CIF space group' : 'from merging'}: <strong>${formatPG(laueClass)}</strong></p>`
     : `<p><em>Laue class not determined from merging.</em></p>`;
   if (redundancy < 1.05) {
     note += `<p style="color:#a60;"><small>⚠ Almost no repeated observations (mean redundancy ${redundancy.toFixed(2)}) — the data look already merged to a unique set, ` +
@@ -140,7 +140,7 @@ function renderLaueOverview(containerEl, noteEl, reflections, cell, laueClass, l
       (fill ? '' : ` Tick <em>fill in symmetry equivalents</em> above to complete the picture from the Laue class.`) + `</small></p>`;
   }
   if (fill) {
-    note += `<p><small><span class="symFilledKey">●</span> orange = not measured itself, filled in from its measured symmetry equivalents under ${laueClass || 'the assumed Laue class'} ` +
+    note += `<p><small><span class="symFilledKey">●</span> orange = not measured itself, filled in from its measured symmetry equivalents under ${laueClass ? formatPG(laueClass) : 'the assumed Laue class'} ` +
       `(${generated.length} positions overall). This shows the <em>assumed</em> symmetry, not a test of it — switch it off to judge the Laue class.</small></p>`;
   }
   noteEl.innerHTML = note;
