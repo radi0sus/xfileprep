@@ -242,6 +242,12 @@
     // /.hkl files) would otherwise look incomplete.
     function observedLatticeFilter() {
       const scan = cachedAbsenceScan();
+      // only conditions a space group of the current Laue class can have count as "forbidden"
+      const cellForLaue = readCellOrNull();
+      if (cellForLaue) {
+        const cls = classifyCellMetric(cellForLaue);
+        setScanLaueContext(scan, determinedLaueClass || cls.laueClasses[0], cls.system.includes('c-unique') ? 'c' : 'b');
+      }
       const centName = observedCenteringName(scan.centering);
       const lat = filterByLattice(lastReflections, centName[0]);
       const allowedTest = r => (!lat.test || lat.test(r)) && !isForbiddenByHeldConditions(scan, r.h, r.k, r.l);
@@ -318,6 +324,10 @@
       if (lastTwinCheck && lastTwinCheck.applicable) {
         const best = lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((x, y) => y.alpha - x.alpha)[0];
         if (best) out.push({ kind: 'law', text: `<code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}` });
+      }
+      if (lastNonMeroCheck && lastNonMeroCheck.applicable) {
+        const nm = lastNonMeroCheck.laws.find(L => L.verdict.startsWith('twinned'));
+        if (nm) out.push({ kind: 'nonmero', text: `non-merohedral twin, 2-fold about ${nm.about === 'direct' ? `[${reducedDirection(nm.axis).join(' ')}]` : `(${reducedDirection(nm.plane).join(' ')})*`} (δ ${nm.delta.toFixed(1)}°, α ≈ ${nm.alpha.toFixed(2)} on overlaps)` });
       }
       const t = lastAnomalousCheck && lastAnomalousCheck.twin;
       const sel = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
@@ -411,6 +421,7 @@
       } catch (err) {
         html += `<p style="color:#b00"><small>Could not run the twin-law check: ${err.message}</small></p>`;
       }
+      html += renderNonMerohedralHtml(cell);
       html += renderInversionTwinHtml(cell);
       el.innerHTML = html;
       const nhEl = document.getElementById('nhPlotContainer');
@@ -420,6 +431,42 @@
       const cbInv = document.getElementById('invTwinToIns');
       if (cbInv) cbInv.addEventListener('change', () => { invTwinWriteToIns = cbInv.checked; if (lastMatchResults) generateIns(); });
       if (lastMatchResults) generateIns();
+    }
+
+    // Non-merohedral twins (twin-check.js): lattice 2-folds with 1-6 deg obliquity,
+    // H test on the overlapping spots only. Refinement needs HKLF 5 — no checkbox.
+    let lastNonMeroCheck = null;
+    function renderNonMerohedralHtml(cell) {
+      lastNonMeroCheck = null;
+      let html = '<h3>Non-merohedral twin laws (partial overlap)</h3>';
+      try {
+        const classification = classifyCellMetric(cell);
+        const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
+        const laue = determinedLaueClass || classification.laueClasses[0];
+        const res = checkNonMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis, observedCenteringName(cachedAbsenceScan().centering));
+        lastNonMeroCheck = res;
+        if (!res.applicable) return html + `<p><small>Nothing to test: ${res.reason}.</small></p>`;
+        const fm = M => M.map(r => r.map(x => x.toFixed(3)).join(' ')).join(' / ');
+        const rows = res.laws.map(L => {
+          const color = L.verdict.startsWith('twinned') ? '#b60' : L.verdict.startsWith('too few') ? '#888' : '#080';
+          return `<tr><td>2-fold about ${L.about === 'direct' ? `[${reducedDirection(L.axis).join(' ')}]` : `(${reducedDirection(L.plane).join(' ')})*`}</td><td>${L.delta.toFixed(2)}°</td>
+            <td><code style="font-size:0.85em">${fm(L.matrix)}</code></td><td>${L.overlaps}</td><td>${L.pairs}</td>
+            <td>${L.alpha === null ? '—' : `${L.alpha.toFixed(2)} <small>± ${L.alphaSe.toFixed(3)}</small>`}</td><td style="color:${color}">${L.verdict}</td></tr>`;
+        }).join('');
+        html += `<p><small>Lattice 2-fold axes with an obliquity of 1–6° map the lattice onto itself only approximately: the spots of both domains overlap only where the rotated
+            reciprocal-lattice point lands within ${res.overlapTolerance} Å⁻¹ of another one (mostly at low angle). The H test is run on those overlapping pairs only; the rotation is tried about the
+            direct row and about the reciprocal row. Pseudo-symmetry makes intensities similar at any distance, a twin only where the spots overlap — untwinned test data stay at α ≈ 0.</small></p>
+          <table class="shellTable"><thead><tr><th>Twin law</th><th>Obliquity δ</th><th>Matrix h′ = M h (rows)</th><th title="Reflections whose twin image lies within the overlap tolerance">Overlapping</th>
+            <th title="Overlapping pairs with both partners measured, I1+I2 > 10σ">Pairs</th><th>Fraction α (overlaps)</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>`;
+        if (res.laws.some(L => L.verdict.startsWith('twinned'))) {
+          html += `<p style="color:#b60"><small><strong>A non-merohedral twin needs an HKLF 5 reflection file</strong> (each overlapping reflection with both components), e.g. from PLATON (TwinRotMat, after a first refinement)
+            or TWINABS. A TWIN instruction with a rounded matrix in HKLF 4 mode would treat every reflection as overlapped — wrong at higher angle — so the .ins gets nothing from here.
+            α refers to the overlapping reflections only; the refined BASF over all data is usually lower.</small></p>`;
+        }
+      } catch (err) {
+        html += `<p style="color:#b00"><small>Could not run the non-merohedral check: ${err.message}</small></p>`;
+      }
+      return html;
     }
 
     // Inversion (racemic) twinning from the Bijvoet pairs (anomalous-check.js).
@@ -553,8 +600,22 @@
         const axialHeads = (Object.values(scan.axial)[0] || []).map(r =>
           `<th title="h00: h = ${r.period}n; 0k0: k = ${r.period}n; 00l: l = ${r.period}n (${SCREW_NAME[r.period] || r.period + '-fold'} screw axis along that direction)" class="hklHead">h / k / l = ${r.period}n</th>`).join('');
 
+        // A condition that holds although no space group of the current Laue class
+        // can have it is pseudo-symmetry (e.g. a pseudo-glide in P -1): flag it —
+        // it is not used to mark reflections as forbidden.
+        let relevance = null, relLaue = null;
+        try {
+          const cellForLaue = readCellOrNull();
+          if (cellForLaue) {
+            const cls = classifyCellMetric(cellForLaue);
+            relLaue = determinedLaueClass || cls.laueClasses[0];
+            relevance = conditionsRelevantForLaue(relLaue, cls.system.includes('c-unique') ? 'c' : 'b');
+          }
+        } catch (err) { relevance = null; }
+        const pseudoNote = `<br><small style="color:#b90" title="Holds in the data, but no space group of Laue class ${relLaue} has this condition: an approximate (pseudo-)symmetry of the structure, not a systematic absence. These reflections are not treated as forbidden.">pseudo-symmetry — impossible in Laue class ${relLaue}</small>`;
         const zonalRows = Object.entries(scan.zonal).flatMap(([zone, results]) =>
-          results.map((r, i) => `<tr><td>${i === 0 ? (zone === 'hhl' ? 'hhl (diagonal plane)' : zone) : ''}</td><td>${i === 0 ? r.reflectionCount : ''}</td><td>${r.name}</td>${verdictCell(r)}</tr>`)
+          results.map((r, i) => `<tr><td>${i === 0 ? (zone === 'hhl' ? 'hhl (diagonal plane)' : zone) : ''}</td><td>${i === 0 ? r.reflectionCount : ''}</td><td>${r.name}${
+            relevance && r.verdict === 'holds' && !relevance.zonal[zone][i] ? pseudoNote : ''}</td>${verdictCell(r)}</tr>`)
         ).join('');
 
         absencesResultEl.innerHTML = `
@@ -1392,6 +1453,7 @@
         insResultEl.innerHTML = '';
         insActionsEl.style.display = 'none';
         lastGeneratedIns = null;
+        document.getElementById('sgDiagramBox').innerHTML = '';
         return;
       }
 
@@ -1429,6 +1491,13 @@
         const matrix = deriveTransformMatrix(nativeEntry.hall, top.hall, values);
         if (matrix && !isIdentity3(matrix)) settingTransform = { matrix, nativeHM: nativeEntry.hm, isPurePermutation: isPurePermutation(matrix), obliqueNote: obliquenessNote(top, matrix, values) };
       }
+
+      // diagram of the selected candidate, drawn in its own setting (the cell
+      // angle used for the drawing is the one after the setting transform)
+      try {
+        renderSpaceGroupDiagram(document.getElementById('sgDiagramBox'), top,
+          settingTransform ? transformCellParameters(values, settingTransform.matrix) : values);
+      } catch (err) { document.getElementById('sgDiagramBox').innerHTML = ''; }
 
       const spaceGroupTag = top.hm.trim().replace(/\s+/g, ' '); // H-M with its spaces (P 1 21/a 1), as in the Hall table
       const ins = generateInsFile({
@@ -1477,7 +1546,11 @@
       // Twinning found on the Twinning tab but not (all) written to this .ins
       const findings = twinFindings() || [];
       const written = twinForIns();
-      const notWritten = findings.filter(x => x.kind === 'law' ? !(written && written.matrix.flat().join(' ') !== '-1 0 0 0 -1 0 0 0 -1')
+      const nonMero = findings.filter(x => x.kind === 'nonmero');
+      const nonMeroInsNote = nonMero.length
+        ? `<p style="color:#b60"><strong>⚠ ${nonMero.map(x => x.text).join(' · ')}</strong> — this .ins (HKLF 4) cannot handle it; refine against an HKLF 5 file (PLATON TwinRotMat or TWINABS). See the <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">Twinning tab</a>.</p>`
+        : '';
+      const notWritten = findings.filter(x => x.kind !== 'nonmero').filter(x => x.kind === 'law' ? !(written && written.matrix.flat().join(' ') !== '-1 0 0 0 -1 0 0 0 -1')
         : !(written && (written.n === -4 || written.matrix.flat().join(' ') === '-1 0 0 0 -1 0 0 0 -1'))).filter(x => x.kind === 'law' || !hallSymbolIsCentrosymmetric(top.hall));
       const twinInsNote = notWritten.length
         ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${notWritten.map(x => x.text).join(' · ')} — tick it on the <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">Twinning tab</a> to add TWIN/BASF.</p>`
@@ -1492,6 +1565,7 @@
         <p><small>Kept in sync automatically with whichever candidate is selected on the Space Group tab — edit the cell/formula fields or the selection there and this updates on its own.</small></p>
         ${tieNote}
         ${twinInsNote}
+        ${nonMeroInsNote}
         ${settingNote}
         ${missingNote}
         ${lambdaNote}

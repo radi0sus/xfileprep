@@ -140,6 +140,7 @@
     <h2>Twinning</h2>
     <p><small><strong>Twin laws beyond the Laue class:</strong> if the lattice has (pseudo-)symmetry beyond the Laue class — 2-fold axes searched independent of the cell choice (Le Page) —
       the crystal can be twinned by the extra operations; the H test (Yeates 1988) compares twin-related reflection pairs and estimates the twin fraction.
+      <strong>Non-merohedral twins:</strong> lattice 2-folds with a few degrees of obliquity, where only part of the spots overlap — tested on the overlapping pairs.
       <strong>Inversion (racemic) twinning:</strong> compares the Bijvoet pairs I(h)/I(−h) with the anomalous signal expected from the composition.
       Nothing is written to the .ins unless you tick it below.</small></p>
     <div id="twinCheckContainer"><p><small>Load reflection data and a cell to run the twin checks.</small></p></div>
@@ -164,6 +165,7 @@
   <div id="tab-spacegroup" class="tabPanel">
     <div id="spaceGroupResult"></div>
     <div id="zPrimeBox"></div>
+    <div id="sgDiagramBox"></div>
   </div>
 
   <div id="tab-ins" class="tabPanel">
@@ -198,6 +200,7 @@
   <script src="static/js/laue-viz.js"></script>
   <script src="static/js/hall-symbols-data.js"></script>
   <script src="static/js/hall-symbol-parser.js"></script>
+  <script src="static/js/sg-diagram.js"></script>
   <script src="static/js/reflection-conditions.js"></script>
   <script src="static/js/candidate-matcher.js"></script>
   <script src="static/js/setting-transform.js"></script>

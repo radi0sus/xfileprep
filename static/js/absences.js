@@ -347,8 +347,43 @@ function effectiveAxialPeriod(results) {
   return best.period;
 }
 
+// Which axial/zonal conditions can be a symmetry element at all in a Laue
+// class: those predicted by at least one space-group setting of that class
+// (Hall table, deriveAllConditions). A condition that "holds" outside this set
+// is pseudo-symmetry, not an absence — pf12c_26_o (P -1): the hhl c-glide
+// "holds" (forbidden class at 2 % of the allowed mean, a pseudo-glide
+// perpendicular to [1 -1 0]), and 261 real hhl reflections with odd l were
+// marked "forbidden but observed" and dropped from E² and completeness.
+const _laueRelevanceCache = new Map();
+function conditionsRelevantForLaue(laue, monoclinicAxis = 'b') {
+  const key = laue + '|' + monoclinicAxis;
+  if (_laueRelevanceCache.has(key)) return _laueRelevanceCache.get(key);
+  const zonal = {}, axial = {};
+  for (const zone of Object.keys(ZONAL_CONDITIONS)) zonal[zone] = ZONAL_CONDITIONS[zone].map(() => false);
+  for (const axis of Object.keys(AXIAL_CLASSES)) axial[axis] = false;
+  for (const e of HALL_SYMBOLS_TABLE) {
+    if (!candidateMatchesLaueClass(e.hall, laue, monoclinicAxis)) continue;
+    const calc = deriveAllConditions(e.hall);
+    for (const zone of Object.keys(ZONAL_CONDITIONS)) {
+      ZONAL_CONDITIONS[zone].forEach((cond, i) => { if (!zonal[zone][i] && allowedSatisfies(calc.zonalAllowed[zone], cond.test)) zonal[zone][i] = true; });
+    }
+    for (const axis of Object.keys(AXIAL_CLASSES)) if (calc.axial[axis] > 1) axial[axis] = true;
+  }
+  const out = { zonal, axial };
+  _laueRelevanceCache.set(key, out);
+  return out;
+}
+
+// Restrict isForbiddenByHeldConditions to the conditions possible in this
+// Laue class (set by app.js once the Laue class is known; without it, all).
+function setScanLaueContext(scan, laue, monoclinicAxis = 'b') {
+  if (!scan) return;
+  try { scan.relevant = laue ? conditionsRelevantForLaue(laue, monoclinicAxis) : null; } catch (err) { scan.relevant = null; }
+}
+
 function isForbiddenByHeldConditions(scan, h, k, l) {
   const r = { h, k, l };
+  const rel = scan.relevant || null;
 
   for (const [name, conds] of Object.entries(CENTERING_CANDIDATES)) {
     if (conds.length === 0 || scan.centering[name].verdict !== 'holds') continue;
@@ -357,6 +392,7 @@ function isForbiddenByHeldConditions(scan, h, k, l) {
 
   for (const [axis, cls] of Object.entries(AXIAL_CLASSES)) {
     if (!cls.select(r)) continue;
+    if (rel && !rel.axial[axis]) continue;
     const idx = cls.indexOf(r);
     const period = effectiveAxialPeriod(scan.axial[axis]);
     if (period > 1 && mod(idx, period) !== 0) return true;
@@ -365,6 +401,7 @@ function isForbiddenByHeldConditions(scan, h, k, l) {
   for (const [zone, conds] of Object.entries(ZONAL_CONDITIONS)) {
     if (!ZONE_SELECTORS[zone](r)) continue;
     conds.forEach((c, i) => {
+      if (rel && !rel.zonal[zone][i]) return;
       if (scan.zonal[zone] && scan.zonal[zone][i] && scan.zonal[zone][i].verdict === 'holds' && mod(c.valueOf(r), c.modulus || 2) !== 0) r._forbidden = true;
     });
     if (r._forbidden) return true;

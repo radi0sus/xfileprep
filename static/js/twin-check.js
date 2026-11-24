@@ -301,3 +301,101 @@ function twinMatrixInSetting(R, S) {
   const Sinv = invert3x3(S);
   return mul3i(mul3i(S, R), Sinv.map(r => r.map(v => Math.round(v))));
 }
+
+// --- Non-merohedral twins (partial overlap) ---------------------------------
+// A lattice 2-fold with an obliquity of a few degrees (Le Page delta ~1-6 deg)
+// does not map the lattice onto itself: rotated reciprocal-lattice points
+// land NEAR other points only at low angle, and only there do the spots of
+// both domains overlap. Twin law = the exact 180 deg rotation about the
+// direct row t or the reciprocal row h (both are tried; non-integral matrix).
+// Test: the H test (as above) on the pairs whose twin image lies within
+// NONMERO_OVERLAP of a lattice point — overlapping spots share intensity.
+// Pseudo-symmetry gives correlation at any distance, a twin only where the
+// spots overlap; the H test stays near 0 for untwinned pseudo-symmetric data
+// (COD 1561021: alpha -0.11; COD 1543504: -0.17). pf12c_26_o (P -1, PLATON
+// TwinRotMat: 2-fold about (1 -1 0)*, 3.40 deg, BASF 0.17): alpha 0.26-0.29 on
+// the closest pairs, falling with distance. Refinement needs an HKLF 5 file.
+const NONMERO_MIN_DELTA = 1;      // below: the merohedral H test above applies
+const NONMERO_MAX_DELTA = 6;      // degrees
+const NONMERO_OVERLAP = 0.01;     // 1/Angstrom, distance of the twin image from a lattice point
+
+function checkNonMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis = 'b', centering = 'P (primitive)') {
+  const G = generateGroup(getLaueClassGenerators(laueClass, monoclinicAxis));
+  const inG = new Set(G.map(twinMatrixKey));
+  const folds = lePageTwoFolds(cell, centering, NONMERO_MAX_DELTA)
+    .filter(f => f.delta > NONMERO_MIN_DELTA && !inG.has(twinMatrixKey(f.R)));
+  if (!folds.length) return { applicable: false, reason: `no lattice 2-fold with an obliquity of ${NONMERO_MIN_DELTA}–${NONMERO_MAX_DELTA}° outside the Laue class` };
+
+  // Cartesian bases (rows): direct A, reciprocal Rr
+  const d2r = Math.PI / 180;
+  const { a, b, c } = cell;
+  const al = cell.alpha * d2r, be = cell.beta * d2r, ga = cell.gamma * d2r;
+  const cx = c * Math.cos(be), cy = c * (Math.cos(al) - Math.cos(be) * Math.cos(ga)) / Math.sin(ga);
+  const A = [[a, 0, 0], [b * Math.cos(ga), b * Math.sin(ga), 0], [cx, cy, Math.sqrt(Math.max(0, c * c - cx * cx - cy * cy))]];
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  const cross = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const V = dot(A[0], cross(A[1], A[2]));
+  const Rr = [cross(A[1], A[2]), cross(A[2], A[0]), cross(A[0], A[1])].map(v => v.map(x => x / V));
+  const cart = (t, B) => [0, 1, 2].map(j => t[0] * B[0][j] + t[1] * B[1][j] + t[2] * B[2][j]);
+
+  // merge under the Laue group
+  const merged = new Map();
+  for (const r of reflections) {
+    if (!(r.sigma > 0)) continue;
+    const h = canonicalHKL(r.h, r.k, r.l, G);
+    const key = h.join(',');
+    let e = merged.get(key);
+    if (!e) { e = { h, sw: 0, swi: 0 }; merged.set(key, e); }
+    const w = 1 / (r.sigma * r.sigma);
+    e.sw += w; e.swi += w * r.f2;
+  }
+  for (const e of merged.values()) { e.I = e.swi / e.sw; e.s = Math.sqrt(1 / e.sw); }
+
+  const laws = [];
+  for (const f of folds) {
+    for (const about of ['reciprocal', 'direct']) {
+      const u0 = about === 'direct' ? cart(f.t, A) : cart(f.h, Rr);
+      const un = Math.sqrt(dot(u0, u0));
+      const u = u0.map(x => x / un);
+      // index matrix of the exact rotation: h' = M h (columns = images of unit indices)
+      const img = hk => { const hc = cart(hk, Rr); const p = 2 * dot(hc, u); const hp = [0, 1, 2].map(i => p * u[i] - hc[i]); return { hp, fi: [0, 1, 2].map(j => dot(hp, A[j])) }; };
+      const cols = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(e => img(e).fi);
+      const matrix = [0, 1, 2].map(i => [0, 1, 2].map(j => cols[j][i]));
+      let overlaps = 0;
+      const Hs = [];
+      const seen = new Set();
+      for (const [key, e] of merged) {
+        const { hp, fi } = img(e.h);
+        const g = fi.map(Math.round);
+        const gc = cart(g, Rr);
+        const dist = Math.hypot(hp[0] - gc[0], hp[1] - gc[1], hp[2] - gc[2]);
+        if (dist > NONMERO_OVERLAP) continue;
+        overlaps++;
+        const key2 = canonicalHKL(g[0], g[1], g[2], G).join(',');
+        if (key2 === key) continue;
+        const pk = key < key2 ? key + '|' + key2 : key2 + '|' + key;
+        if (seen.has(pk)) continue;
+        seen.add(pk);
+        const e2 = merged.get(key2);
+        if (!e2) continue;
+        const sum = e.I + e2.I, snr = sum / Math.hypot(e.s, e2.s);
+        if (snr > 3) Hs.push({ H: Math.abs(e.I - e2.I) / sum, strong: snr > 10 });
+      }
+      const strong = Hs.filter(x => x.strong);
+      const used = (strong.length >= 200 ? strong : Hs).map(x => x.H);
+      const n = used.length;
+      const meanH = n ? used.reduce((s, x) => s + x, 0) / n : null;
+      const alphaRaw = meanH === null ? null : 0.5 - meanH;
+      const sd = n > 1 ? Math.sqrt(used.reduce((s, x) => s + (x - meanH) ** 2, 0) / (n - 1)) : null;
+      const alphaSe = sd !== null ? sd / Math.sqrt(n) : null;
+      const alpha = alphaRaw === null ? null : Math.max(0, alphaRaw);
+      let verdict;
+      if (n < 100) verdict = 'too few overlapping pairs';
+      else if (alpha >= TWIN_SIGNIFICANT_ALPHA && alpha > 3 * alphaSe) verdict = 'twinned (non-merohedral)';
+      else verdict = 'no indication';
+      laws.push({ axis: f.t, plane: f.h, about, delta: f.delta, matrix, overlaps, pairs: n, meanH, alpha, alphaSe, verdict, hValues: used });
+    }
+  }
+  laws.sort((x, y) => (y.verdict.startsWith('twinned') - x.verdict.startsWith('twinned')) || ((y.alpha || 0) - (x.alpha || 0)));
+  return { applicable: true, laws, overlapTolerance: NONMERO_OVERLAP };
+}

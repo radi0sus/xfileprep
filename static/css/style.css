@@ -475,3 +475,54 @@ label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center;
 .twinBanner a { color: var(--accent); cursor: pointer; }
 /* Miller indices in table heads stay lower case (h / k / l = 2n) */
 th.hklHead { text-transform: none; }
+
+/* Space-group diagram (sg-diagram.js) */
+:root { --sgd-pos: #d0345a; }
+@media (prefers-color-scheme: dark) { :root { --sgd-pos: #ff7f98; } }
+.sgdBox { margin: 1.2rem 0 1.6rem; }
+.sgdTitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1.4rem; margin-bottom: 0.4rem; }
+.sgdShort { font-size: 1.25rem; font-weight: 650; font-style: italic; }
+.sgdFull { font-style: italic; color: var(--text-muted); }
+.sgdPg { font-style: italic; color: var(--text-muted); }
+.sgdNo { color: var(--text-muted); }
+.sgdSetting { font-size: 0.8rem; color: var(--text-muted); }
+.sgdBody { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; }
+svg.sgDiagram { width: 100%; max-width: 520px; height: auto; display: block; font-family: inherit; }
+.sgDiagram .sgdCell { stroke: var(--text-muted); stroke-width: 1; }
+.sgDiagram .sgdGrid { stroke: var(--text-muted); stroke-width: 0.6; opacity: 0.55; }
+.sgDiagram .sgdPlane { stroke: var(--text); stroke-width: 1.6; fill: none; }
+.sgDiagram .sgdPlane.mirror { stroke-width: 3; }
+.sgDiagram .sgdLens, .sgDiagram .sgdArrowHead { fill: var(--text); stroke: var(--text); stroke-width: 0.6; }
+.sgDiagram .sgdHook { fill: none; stroke: var(--text); stroke-width: 1.5; stroke-linecap: round; }
+.sgDiagram .sgdAxisArrow, .sgDiagram .sgdCornerArrow { stroke: var(--text); stroke-width: 1.4; }
+.sgDiagram .sgdCorner { fill: none; stroke: var(--text); stroke-width: 1.6; }
+.sgDiagram .sgdCorner.mirror { stroke-width: 3; }
+.sgDiagram .sgdInv { fill: var(--surface); stroke: var(--text); stroke-width: 1.2; }
+.sgDiagram .sgdSmall { fill: var(--text); font-size: 12.5px; }
+.sgDiagram .sgdPos { fill: none; stroke: var(--sgd-pos); stroke-width: 1.5; }
+.sgDiagram .sgdPosSplit { stroke: var(--sgd-pos); stroke-width: 1.1; }
+.sgDiagram .sgdCommaDot { fill: var(--sgd-pos); }
+.sgDiagram .sgdCommaTail { fill: none; stroke: var(--sgd-pos); stroke-width: 1.6; stroke-linecap: round; }
+.sgDiagram .sgdPosLabel { fill: var(--sgd-pos); font-size: 13px; font-weight: 650; }
+.sgDiagram .sgdAxisName, .sgDiagram .sgdAngleName { fill: var(--text); font-size: 17px; font-style: italic; }
+.sgDiagram .sgdAxisLabelArrow { stroke: var(--text); stroke-width: 1; marker-end: none; }
+.sgDiagram .sgdAngle { fill: none; stroke: var(--text); stroke-width: 1; }
+.sgdListBox { min-width: 15rem; }
+.sgdListHead { font-weight: 650; }
+.sgdListHead span { font-weight: 400; color: var(--text-muted); font-size: 0.85rem; }
+.sgdListSub { font-size: 0.78rem; color: var(--text-muted); max-width: 19rem; margin: 0.1rem 0 0.4rem; line-height: 1.35; }
+.sgdList { margin: 0; padding-left: 1.6rem; line-height: 1.75; font-variant-numeric: tabular-nums; }
+.sgdList li::marker { color: var(--text-muted); }
+.sgdXYZ { font-style: italic; display: inline-block; min-width: 10.5rem; }
+.sgdOpSym { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.6rem; font-style: normal; }
+.sgDiagram .sgdHit { fill: transparent; stroke: none; }
+.sgDiagram .sgdPosGroup { cursor: help; }
+.sgDiagram .sgdPosGroup:hover .sgdPos { stroke-width: 2.6; }
+.sgdList .sgdCentring { list-style: none; margin-left: -1.6rem; font-style: normal; }
+.sgdNote { margin-top: 0.3rem; color: var(--text-muted); }
+.sgdBar { text-decoration: overline; }
+.sgDiagram .sgdHitLine { stroke: transparent; stroke-width: 10; }
+.sgDiagram .sgdEl { cursor: help; }
+.sgDiagram .sgdEl:hover .sgdPlane, .sgDiagram .sgdEl:hover .sgdAxisArrow, .sgDiagram .sgdEl:hover .sgdCorner { stroke: var(--accent); }
+.sgDiagram .sgdEl:hover .sgdLens, .sgDiagram .sgdEl:hover .sgdArrowHead { fill: var(--accent); stroke: var(--accent); }
+.sgDiagram .sgdEl:hover .sgdHook, .sgDiagram .sgdEl:hover .sgdInv, .sgDiagram .sgdEl:hover .sgdCornerArrow { stroke: var(--accent); }
