@@ -473,3 +473,5 @@ label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center;
   border: 1px solid var(--warning); color: var(--text); font-size: 0.92rem;
 }
 .twinBanner a { color: var(--accent); cursor: pointer; }
+/* Miller indices in table heads stay lower case (h / k / l = 2n) */
+th.hklHead { text-transform: none; }

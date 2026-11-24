@@ -32,6 +32,31 @@ function reciprocalPlaneBasis(cell, uIdx, vIdx) {
   return { lu: L[uIdx], lv: L[vIdx], cosT, sinT: Math.sqrt(Math.max(0, 1 - cosT * cosT)), metric: true };
 }
 
+// Same, for two arbitrary reciprocal-lattice directions given as index
+// vectors, e.g. u = [1, 1, 0] (a* + b*) and v = [0, 0, 1] (c*) for the
+// diagonal plane hhl. Lengths and angle from the reciprocal metric tensor
+// G* = G⁻¹ (G = direct metric tensor).
+function reciprocalBasisForVectors(cell, uVec, vVec) {
+  const fallback = { lu: 1, lv: 1, cosT: 0, sinT: 1, metric: false };
+  if (!cell) return fallback;
+  const keys = ['a', 'b', 'c', 'alpha', 'beta', 'gamma'];
+  if (!keys.every(k => Number.isFinite(cell[k]) && cell[k] > 0)) return fallback;
+  const { a, b, c } = cell;
+  const [ca, cb, cg] = [cell.alpha, cell.beta, cell.gamma].map(d => Math.cos(_toRad(d)));
+  const G = [[a * a, a * b * cg, a * c * cb], [a * b * cg, b * b, b * c * ca], [a * c * cb, b * c * ca, c * c]];
+  const det = G[0][0] * (G[1][1] * G[2][2] - G[1][2] * G[2][1]) - G[0][1] * (G[1][0] * G[2][2] - G[1][2] * G[2][0]) + G[0][2] * (G[1][0] * G[2][1] - G[1][1] * G[2][0]);
+  if (!(det > 1e-9)) return fallback;
+  const Gs = [0, 1, 2].map(i => [0, 1, 2].map(j => {
+    const r = [0, 1, 2].filter(x => x !== j), cIdx = [0, 1, 2].filter(x => x !== i);
+    const m = G[r[0]][cIdx[0]] * G[r[1]][cIdx[1]] - G[r[0]][cIdx[1]] * G[r[1]][cIdx[0]];
+    return ((i + j) % 2 ? -m : m) / det;
+  }));
+  const dot = (x, y) => x.reduce((s, xi, i) => s + xi * y.reduce((t, yj, j) => t + Gs[i][j] * yj, 0), 0);
+  const lu = Math.sqrt(dot(uVec, uVec)), lv = Math.sqrt(dot(vVec, vVec));
+  const cosT = dot(uVec, vVec) / (lu * lv);
+  return { lu, lv, cosT, sinT: Math.sqrt(Math.max(0, 1 - cosT * cosT)), metric: true };
+}
+
 // Maps lattice coordinates (u, v) to canvas pixels, equal aspect, fitted
 // and centered into `box` {x, y, w, h}. Returns px(u,v), py(u,v) and the
 // pixel distance between neighbouring lattice rows (for marker sizing).

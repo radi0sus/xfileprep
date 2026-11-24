@@ -171,11 +171,22 @@
       violated: 'violated',
       inconclusive: 'undetermined',
     };
+    // Verdict (° = satisfied via the weak-tail rule) and the share of forbidden
+    // reflections above 3σ; counts and reason in one tooltip on the whole cell.
     function verdictCell(r) {
       const style = VERDICT_STYLE[r.verdict] || '';
-      const title = r.reason ? ` title="${r.reason.replace(/"/g, '&quot;')}"` : '';
       const label = VERDICT_LABEL[r.verdict] || r.verdict;
-      return `<td style="${style}"${title}>${label} <small title="share of forbidden reflections with I/σ ≥ 3">(${r.violationPercent.toFixed(1)}%)</small></td>`;
+      const tip = [];
+      if (r.forbiddenCount > 0 && Number.isFinite(r.forbiddenPresentCount)) {
+        tip.push(`${r.forbiddenPresentCount} of ${r.forbiddenCount} forbidden reflections above ${ABSENCE_SIGNIFICANCE_THRESHOLD}σ`);
+      } else if (r.note) {
+        tip.push(r.note);
+      } else if (r.forbiddenCount === 0) {
+        tip.push('no forbidden reflections in the data');
+      }
+      if (r.reason) tip.push(r.reason);
+      const title = tip.length ? ` title="${tip.join(' — ').replace(/"/g, '&quot;')}"` : '';
+      return `<td style="${style}"${title}>${label}${r.weakTail ? '°' : ''} <small>(${r.violationPercent.toFixed(1)}%)</small></td>`;
     }
 
     // Current cell fields as numbers, or null if any is missing (plots then fall back to an index grid).
@@ -522,32 +533,47 @@
         setTimeout(() => {
         const scan = scanAllAbsences(lastReflections);
 
+        // Display text for the centering conditions (the tests are in absences.js).
+        // P is left out: it has no condition and always reads "satisfied".
+        const CENTERING_CONDITION_TEXT = {
+          'A': 'k+l = 2n', 'B': 'h+l = 2n', 'C': 'h+k = 2n', 'I': 'h+k+l = 2n',
+          'F': 'h+k, h+l, k+l = 2n', 'R (obverse)': '−h+k+l = 3n', 'R (reverse)': 'h−k−l = 3n',
+        };
         const centeringRows = Object.entries(scan.centering)
-          .map(([name, r]) => `<tr><td>${name}</td>${verdictCell(r)}</tr>`).join('');
+          .filter(([name]) => CENTERING_CONDITION_TEXT[name])
+          .map(([name, r]) => `<tr><td>${name}</td><td>${CENTERING_CONDITION_TEXT[name]}</td>${verdictCell(r)}</tr>`).join('');
 
         const axialRows = Object.entries(scan.axial).map(([axis, results]) => {
           const cells = results.map(r => verdictCell(r)).join('');
           return `<tr><td>${axis}</td><td>${results[0].reflectionCount}</td>${cells}</tr>`;
         }).join('');
+        // column heads: the condition is on the index along the row's own axis
+        // (h00 → h, 0k0 → k, 00l → l); the tooltip spells it out per axis
+        const SCREW_NAME = { 2: '2₁', 3: '3₁ or 3₂', 4: '4₁ or 4₃', 6: '6₁ or 6₅' };
+        const axialHeads = (Object.values(scan.axial)[0] || []).map(r =>
+          `<th title="h00: h = ${r.period}n; 0k0: k = ${r.period}n; 00l: l = ${r.period}n (${SCREW_NAME[r.period] || r.period + '-fold'} screw axis along that direction)" class="hklHead">h / k / l = ${r.period}n</th>`).join('');
 
         const zonalRows = Object.entries(scan.zonal).flatMap(([zone, results]) =>
-          results.map((r, i) => `<tr><td>${i === 0 ? (zone === 'hhl' ? 'hhl (diagonal plane)' : zone) : ''}</td><td>${r.name}</td>${verdictCell(r)}</tr>`)
+          results.map((r, i) => `<tr><td>${i === 0 ? (zone === 'hhl' ? 'hhl (diagonal plane)' : zone) : ''}</td><td>${i === 0 ? r.reflectionCount : ''}</td><td>${r.name}</td>${verdictCell(r)}</tr>`)
         ).join('');
 
         absencesResultEl.innerHTML = `
           <h2>Reflection conditions (from systematic absences)</h2>
 
-          <h3>Lattice centering (whole dataset)</h3>
-          <table><tr><th>Type</th><th>Status</th></tr>${centeringRows}</table>
+          <h3>Lattice centering (whole dataset, ${lastReflections.length} reflections)</h3>
+          <table><tr><th>Type</th><th>Condition</th><th>Status</th></tr>${centeringRows}</table>
 
           <h3>Axial conditions (screw axes)</h3>
           <table>
-            <tr><th>Axis</th><th>n refl.</th><th title="reflections are allowed only if the index along this axis is a multiple of 2">index = 2n</th><th title="reflections are allowed only if the index along this axis is a multiple of 3">index = 3n</th><th title="reflections are allowed only if the index along this axis is a multiple of 4">index = 4n</th><th title="reflections are allowed only if the index along this axis is a multiple of 6">index = 6n</th></tr>
+            <tr><th>Axis</th><th>N refl.</th>${axialHeads}</tr>
             ${axialRows}
           </table>
 
           <h3>Zonal conditions (glide planes)</h3>
-          <table><tr><th>Zone</th><th>Condition</th><th>Status</th></tr>${zonalRows}</table>
+          <table><tr><th>Zone</th><th>N refl.</th><th>Condition</th><th>Status</th></tr>${zonalRows}</table>
+
+          <p><small>Percentage = share of the forbidden reflections that are still significant (I/σ ≥ 3) — 0% is the clean case. Hover a status for the counts and the reason.
+          ° = satisfied although some forbidden reflections are significant: they are only a weak residual tail (median I/σ &lt; 3), not a violation.</small></p>
 
           <details class="explain"><summary>How to read these results</summary><p><small>Percentage = share of "forbidden" reflections that are still significant (I/σ ≥ 3) — 0% is the clean case.
           <strong>d-glide</strong> = quarter translation (the condition is on a sum modulo 4, e.g. k+l = 4n). <strong>hhl</strong> is the plane through the diagonal (k = h): there the glide/mirror planes
@@ -558,7 +584,7 @@
           It happens for one of two causes: too few reflections in the allowed (reference) class to say anything, or the allowed
           class itself is mostly weak too (common for a condition that only really shows up at higher resolution) — in both cases
           the percentage next to it isn't meaningful evidence, whether it's 0% or high.
-          A condition can also read <strong>"satisfied"</strong> despite a non-zero percentage: if the <em>median</em> I/σ of the forbidden class is below 3
+          A condition can also read <strong>"satisfied°"</strong> despite a non-zero percentage: if the <em>median</em> I/σ of the forbidden class is below 3
           (hover the cell), the significant ones are just the upper tail of weak residual intensity. The plots below grey out cells forbidden by such accepted conditions.</small></p></details>`;
 
         document.getElementById('absenceVizSection').style.display = 'block';

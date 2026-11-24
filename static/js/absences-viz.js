@@ -76,7 +76,14 @@ const ZONE_PLOT_CONFIG = {
   h0l: { select: ZONE_SELECTORS.h0l, xOf: r => r.h, yOf: r => r.l, xLabel: 'h', yLabel: 'l', fixed: 'k = 0', uIdx: 0, vIdx: 2 },
   '0kl': { select: ZONE_SELECTORS['0kl'], xOf: r => r.k, yOf: r => r.l, xLabel: 'k', yLabel: 'l', fixed: 'h = 0', uIdx: 1, vIdx: 2 },
   hk0: { select: ZONE_SELECTORS.hk0, xOf: r => r.h, yOf: r => r.k, xLabel: 'h', yLabel: 'k', fixed: 'l = 0', uIdx: 0, vIdx: 1 },
+  // diagonal plane: x runs along (h h 0), i.e. a* + b*; y along c*
+  hhl: { select: ZONE_SELECTORS.hhl, xOf: r => r.h, yOf: r => r.l, xLabel: 'h (= k)', yLabel: 'l', fixed: 'k = h', uVec: [1, 1, 0], vVec: [0, 0, 1] },
 };
+
+// hhl holds symmetry planes only when a = b (tetragonal, trigonal/hexagonal, cubic)
+function hhlIsMeaningful(cell) {
+  return !!cell && Number.isFinite(cell.a) && Number.isFinite(cell.b) && Math.abs(cell.a - cell.b) / Math.max(cell.a, cell.b) < 0.005;
+}
 
 // A cell is "present" if some observation is significant AND the cell is not
 // forbidden by a condition the scan judged to hold (see absences.js).
@@ -85,11 +92,12 @@ function cellIsPresent(c, scan) {
   return !(scan && isForbiddenByHeldConditions(scan, c.hkl[0], c.hkl[1], c.hkl[2]));
 }
 
-function renderZonePlot(canvas, reflections, zoneName, scan, cell, zoom = 1) {
+// size: CSS edge length of the plot (300, or less when four plots share a row)
+function renderZonePlot(canvas, reflections, zoneName, scan, cell, zoom = 1, size = 300) {
   const colors = getPlotColors();
   const cfg = ZONE_PLOT_CONFIG[zoneName];
   const relevant = reflections.filter(cfg.select);
-  const cssW = 300, cssH = 300;
+  const cssW = size, cssH = size;
   const ctx = setupCanvasForDPR(canvas, cssW, cssH, colors, zoom);
 
   if (relevant.length === 0) {
@@ -107,18 +115,20 @@ function renderZonePlot(canvas, reflections, zoneName, scan, cell, zoom = 1) {
   if (r.vMin === r.vMax) { r.vMin -= 1; r.vMax += 1; }
 
   // true reciprocal-lattice metric (falls back to a square index grid without a cell)
-  const basis = reciprocalPlaneBasis(cell, cfg.uIdx, cfg.vIdx);
+  const basis = cfg.uVec ? reciprocalBasisForVectors(cell, cfg.uVec, cfg.vVec) : reciprocalPlaneBasis(cell, cfg.uIdx, cfg.vIdx);
   const box = { x: 34, y: 10, w: cssW - 44, h: cssH - 38 };
   const frame = makeLatticeFrame(basis, r.uMin, r.uMax, r.vMin, r.vMax, box);
   drawLatticeGrid(ctx, colors, frame, r,
     { x: cfg.xLabel, y: cfg.yLabel },
     (lo, hi) => integerTicks(lo, hi, niceIntStep(hi - lo)), cssW, cssH);
 
-  // one square per aggregated lattice point
-  const cellSize = Math.max(2, frame.spacing * 0.75);
+  // one small dot per aggregated lattice point (as in the axial strips)
+  const dotRadius = Math.max(1.2, frame.spacing * 0.36);
   for (const c of cells) {
     ctx.fillStyle = cellIsPresent(c, scan) ? colors.present : colors.absent;
-    ctx.fillRect(frame.px(c.x, c.y) - cellSize / 2, frame.py(c.x, c.y) - cellSize / 2, cellSize, cellSize);
+    ctx.beginPath();
+    ctx.arc(frame.px(c.x, c.y), frame.py(c.x, c.y), dotRadius, 0, 2 * Math.PI);
+    ctx.fill();
   }
 }
 
@@ -192,17 +202,24 @@ let _lastAbsenceVizArgs = null;
 function renderAbsenceVisuals(zoneContainerEl, axialContainerEl, reflections, scan, cell) {
   _lastAbsenceVizArgs = [zoneContainerEl, axialContainerEl, reflections, scan, cell];
   zoneContainerEl.innerHTML = '';
+  // four plots in one row (each a bit smaller; click still enlarges to full
+  // size). hhl holds symmetry planes only for a = b — otherwise the caption
+  // says so, with the reason in its tooltip.
+  const size = 226;
+  const hhlUseful = hhlIsMeaningful(cell);
   for (const [zoneName, cfg] of Object.entries(ZONE_PLOT_CONFIG)) {
     const wrap = document.createElement('div');
     wrap.className = 'zonePlotWrap';
     const caption = document.createElement('div');
     caption.className = 'plotCaption';
-    caption.innerHTML = `<strong>${zoneName}</strong> <small>(${cfg.fixed})</small>`;
+    const offNote = zoneName === 'hhl' && !hhlUseful;
+    caption.innerHTML = `<strong>${zoneName}</strong> <small>(${cfg.fixed})</small>`
+      + (offNote ? ' <small title="a ≠ b: the diagonal plane holds mirror/glide planes only in tetragonal, trigonal/hexagonal and cubic cells — here it just repeats the centering">· a ≠ b ⓘ</small>' : '');
     const canvas = document.createElement('canvas');
     wrap.appendChild(caption);
     wrap.appendChild(canvas);
     zoneContainerEl.appendChild(wrap);
-    renderZonePlot(canvas, reflections, zoneName, scan, cell);
+    renderZonePlot(canvas, reflections, zoneName, scan, cell, 1, size);
     attachPlotZoom(wrap, caption.innerHTML, 300,
       (cv, zoom) => renderZonePlot(cv, reflections, zoneName, scan, cell, zoom));
   }

@@ -223,7 +223,7 @@ function renderShellStatistics(container, stats, info) {
       ${rows}${total}
     </table>
     ${redNote}${cutNote}
-    <div id="shellCurvesA"></div><div id="shellCurvesB"></div>
+    <div class="plotContainer shellCurves"><div id="shellCurvesA"></div><div id="shellCurvesB"></div></div>
     <details class="shellLegend">
       <summary>What do these columns mean?</summary>
       <ul>

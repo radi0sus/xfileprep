@@ -116,6 +116,7 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
 
   let verdict;
   let reason = null;
+  let weakTail = false; // "holds" only thanks to the weak-residual-tail rule
   if (allowed.count < minCount && allowed.count >= 1 && forbiddenCount >= 2
       && violationPercent > violationPercentThreshold && meanRatioPercent >= MAX_TAIL_MEAN_RATIO_PERCENT
       && (medianISigma === null || medianISigma >= ABSENCE_SIGNIFICANCE_THRESHOLD)) {
@@ -139,6 +140,7 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
       // typical forbidden reflection is insignificant; the significant ones are
       // the upper tail of residual intensity, not a real violation
       verdict = 'holds';
+      weakTail = true;
       reason = `${violationPercent.toFixed(0)}% of single forbidden reflections exceed ${ABSENCE_SIGNIFICANCE_THRESHOLD}σ, but the class median is only I/σ = ${medianISigma.toFixed(1)} `
         + `(forbidden/allowed mean intensity ${meanRatioPercent.toFixed(2)}%) — a weak residual tail, not a violation`;
     } else {
@@ -149,7 +151,7 @@ function judgeCondition(buckets, { minCount = 5, violationPercentThreshold = 15,
     verdict = 'holds';
   }
 
-  return { verdict, reason, violationPercent, meanRatioPercent, medianISigma, forbiddenCount, allowedCount: allowed.count, allowedPresentPercent };
+  return { verdict, reason, weakTail, violationPercent, meanRatioPercent, medianISigma, forbiddenCount, forbiddenPresentCount, allowedCount: allowed.count, allowedPresentPercent };
 }
 
 // --- Lattice centering (whole dataset) ---------------------------------
@@ -183,7 +185,9 @@ function scanLatticeCentering(reflections) {
     const overall = judged.some(j => j.verdict === 'violated') ? 'violated'
       : judged.every(j => j.verdict === 'holds') ? 'holds'
       : 'inconclusive';
-    results[name] = { verdict: overall, violationPercent: worst.violationPercent, forbiddenCount: worst.forbiddenCount, allowedCount: worst.allowedCount };
+    results[name] = { verdict: overall, violationPercent: worst.violationPercent, forbiddenCount: worst.forbiddenCount,
+      forbiddenPresentCount: worst.forbiddenPresentCount, allowedCount: worst.allowedCount,
+      reason: worst.reason, weakTail: overall === 'holds' && judged.some(j => j.weakTail) };
   }
   return results;
 }
