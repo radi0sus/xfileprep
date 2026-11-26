@@ -18,11 +18,12 @@
   <div class="tabBar" id="tabBar">
     <button class="tabBtn active" data-tab="tab-file">1. File &amp; Cell</button>
     <button class="tabBtn" data-tab="tab-laue">2. Laue Symmetry</button>
-    <button class="tabBtn" data-tab="tab-twin" id="twinTabBtn">3. Twinning</button>
+    <button class="tabBtn" data-tab="tab-twin" id="twinTabBtn">3. Twins &amp; Abs. Structure</button>
     <button class="tabBtn" data-tab="tab-absences">4. Absences</button>
     <button class="tabBtn" data-tab="tab-estat">5. E² Statistics</button>
     <button class="tabBtn" data-tab="tab-spacegroup">6. Space Group</button>
     <button class="tabBtn" data-tab="tab-ins">7. SHELX .ins and .hkl</button>
+    <button class="tabBtn" data-tab="tab-report">8. Report</button>
   </div>
   <div id="twinBanner" class="twinBanner" style="display:none;"></div>
 
@@ -137,12 +138,7 @@
   </div>
 
   <div id="tab-twin" class="tabPanel">
-    <h2>Twinning</h2>
-    <p><small><strong>Twin laws beyond the Laue class:</strong> if the lattice has (pseudo-)symmetry beyond the Laue class — 2-fold axes searched independent of the cell choice (Le Page) —
-      the crystal can be twinned by the extra operations; the H test (Yeates 1988) compares twin-related reflection pairs and estimates the twin fraction.
-      <strong>Non-merohedral twins:</strong> lattice 2-folds with a few degrees of obliquity, where only part of the spots overlap — tested on the overlapping pairs.
-      <strong>Inversion (racemic) twinning:</strong> compares the Bijvoet pairs I(h)/I(−h) with the anomalous signal expected from the composition.
-      Nothing is written to the .ins unless you tick it below.</small></p>
+    <h2>Twins &amp; absolute structure</h2>
     <div id="twinCheckContainer"><p><small>Load reflection data and a cell to run the twin checks.</small></p></div>
   </div>
 
@@ -185,6 +181,31 @@
     </div>
   </div>
 
+  <div id="tab-report" class="tabPanel">
+    <h2>Report</h2>
+    <p><small>Everything the other tabs found, in one document: inputs with checksums, the decisions and who made them (automatic, by hand, from a file),
+    points to check, and the details of each step. <strong>Save report</strong> writes a self-contained HTML file (plots included, opens in any browser);
+    <strong>Print / PDF</strong> opens the print dialog — choose “Save as PDF” there. The <strong>text listing</strong> (<code>…_report.txt</code>) is the same content as plain ASCII text, in the spirit of XPREP's .prp file.</small></p>
+    <div class="reportControls">
+      <label class="reportNotes"><strong>Sample / notes</strong> <small>(printed in the header)</small>
+        <textarea id="reportNotes" rows="2" placeholder="e.g. sample code, operator, instrument, remarks"></textarea></label>
+      <div class="reportOpts">
+        <strong>Include</strong>
+        <label><input type="checkbox" id="reportOptPlots" checked> plots</label>
+        <label><input type="checkbox" id="reportOptShells" checked> resolution-shell table</label>
+        <label><input type="checkbox" id="reportOptZones"> zone plots (absences)</label>
+        <label><input type="checkbox" id="reportOptIns" checked> .ins in the appendix</label>
+      </div>
+      <div class="reportActions">
+        <button id="reportSaveHtmlBtn" type="button">Save report (.html)</button>
+        <button id="reportPrintBtn" type="button">Print / PDF…</button>
+        <button id="reportSavePrpBtn" type="button">Save as text (.txt)</button>
+      </div>
+    </div>
+    <p id="reportStatus"></p>
+    <iframe id="reportPreview" class="reportPreview" title="Report preview"></iframe>
+  </div>
+
   <script src="static/js/tabs.js"></script>
   <script src="static/js/plot-theme.js"></script>
   <script src="static/js/plot-zoom.js"></script>
@@ -218,12 +239,14 @@
   <script src="static/js/pseudo-translation.js"></script>
   <script src="static/js/twin-check.js"></script>
   <script src="static/js/anomalous-check.js"></script>
+  <script src="static/js/abs-structure.js"></script>
   <script src="static/js/twin-viz.js"></script>
   <script src="static/js/view-modal.js"></script>
   <script src="static/js/reflection-marks.js"></script>
   <script src="static/js/layer-viewer.js"></script>
   <script src="static/js/laue-3d.js"></script>
   <script src="static/js/app.js"></script>
+  <script src="static/js/report-writer.js"></script>
 </div>
 </body>
 </html>

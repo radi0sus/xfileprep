@@ -38,12 +38,17 @@
     // Which file supplied what — shown in a strip above the tabs so it stays
     // visible on every tab (the app otherwise "forgets" earlier drops visually).
     const loadedFiles = { reflections: null, cell: null };
+    // Results kept for the report (report-writer.js): each step stores what
+    // it computed here, so the report needs no calculation of its own.
+    const reportState = {};
+    let lastFileMeta = null;      // {name, size, modified, sha256} of the file being read right now
+    let cellEditedByHand = false; // a cell constant was typed in after the last file filled them in
     let awaitingJump = false; // pipeline is ready, but we stayed on tab 1 because the formula is still missing
     let batchDepth = 0;      // >0 while several files are processed in one go
     let pendingRun = false;  // pipeline run requested during a batch, executed once at its end
     const loadedFilesEl = document.getElementById('loadedFiles');
     function noteLoaded(kind, name, extra) {
-      loadedFiles[kind] = { name: name || '(unnamed)', extra: extra || '' };
+      loadedFiles[kind] = { name: name || '(unnamed)', extra: extra || '', meta: lastFileMeta };
       renderLoadedFiles();
     }
     function renderLoadedFiles() {
@@ -65,6 +70,11 @@
       window.switchTab(go.dataset.go);
     });
     renderLoadedFiles();
+    // Tells the report tab (report-writer.js) that a result changed; it
+    // rebuilds its preview only while it is the visible tab.
+    function reportChanged() {
+      if (typeof reportScheduleRefresh === 'function') reportScheduleRefresh();
+    }
     let lastLoadedFileBaseName = null; // filename (no extension) of whichever file was loaded most recently, used as a TITL prefix
 
     // H-M symbol for display (HTML). The SHELX .ins TITL line and all file
@@ -238,7 +248,7 @@
       return info.strongFound.map(f => `${ptLabel(f.label)}, t = ${f.vector}: ${f.cond}${f.aliases.length ? ` (= ${f.aliases.map(a => a.cond).join(' = ')})` : ''} at ${ptRatioText(f.stats)} of the rest`).join('; ');
     }
 
-    // Short warning for the E² and Twinning tabs; '' if nothing strong was found.
+    // Short warning for the E² tab and tab 3; '' if nothing strong was found.
     function pseudoTranslationWarning(where) {
       const info = pseudoTranslationInfo();
       if (!info || !info.strongFound.length) return '';
@@ -324,8 +334,10 @@
         const group = generateGroup(getLaueClassGenerators(laue, monoclinicAxis));
         const lat = observedLatticeFilter();
         const stats = computeShellStatistics(lat.reflections, cell, group, 10, lat.allowedTest);
+        reportState.shell = { stats, laue, source: determinedLaueClassSource, lattice: lat.note };
         renderShellStatistics(el, stats, { laue, source: determinedLaueClassSource, lattice: lat.note });
       } catch (err) {
+        reportState.shell = null;
         el.innerHTML = `<p style="color:#b00"><small>Could not compute shell statistics: ${err.message}</small></p>`;
       }
     }
@@ -336,13 +348,18 @@
     let twinWriteToIns = false;    // checkbox state, survives re-renders of the section
     // Hint on the E² tab: twinning narrows the intensity distribution (N(z),
     // <|E²-1|>), so the centro/acentric verdict there is not reliable.
+    let lastEStatVerdict = null; // 'centrosymmetric' | 'acentric' from the E² tab
     function renderE2TwinNote() {
       const el = document.getElementById('eStatTwinNote');
       if (!el) return;
+      // cross-check from tab 3: a clear Bijvoet signal proves an acentric structure
+      const bijvoet = lastAnomalousCheck && lastAnomalousCheck.enough && lastAnomalousCheck.acentricEvidence === 'strong' && lastEStatVerdict === 'centrosymmetric'
+        ? `<p style="color:#b60"><strong>⚠ Bijvoet pairs say acentric</strong> (tab 3: χ² = ${lastAnomalousCheck.chi2.toFixed(1)}): Friedel's law is clearly broken, which no centrosymmetric
+            structure can do — the "centrosymmetric" verdict below is overruled (twinning, a dominant heavy atom or pseudo-symmetry can make E² look centrosymmetric).</p>` : '';
       const laws = lastTwinCheck && lastTwinCheck.applicable ? lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')) : [];
-      if (!laws.length) { el.innerHTML = ''; return; }
+      if (!laws.length) { el.innerHTML = bijvoet; return; }
       const best = laws.sort((a, b) => b.alpha - a.alpha)[0];
-      el.innerHTML = `<p style="color:#b60"><strong>⚠ Twinning found</strong> (Twinning tab: <code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}).
+      el.innerHTML = bijvoet + `<p style="color:#b60"><strong>⚠ Twinning found</strong> (tab 3: <code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}).
         Twinning averages the intensities of twin-related reflections and narrows their distribution: ⟨|E²−1|⟩ drops below the acentric value
         and N(z) moves towards the twinned-acentric curve. The centrosymmetric/acentric verdict below is therefore unreliable — an "acentric" can
         come from the twin alone, while a "centrosymmetric" despite the twin points to pseudo-symmetry (e.g. Z′ > 1, heavy atoms on special positions).</p>`;
@@ -363,7 +380,9 @@
       const t = lastAnomalousCheck && lastAnomalousCheck.twin;
       const sel = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
       // an inversion twin only exists in an acentric space group
-      if (t && t.x >= 0.1 && t.expectedChi2 >= 1.5 && sel && !hallSymbolIsCentrosymmetric(sel.hall)) out.push({ kind: 'inversion', text: `inversion twin, x ≈ ${t.x.toFixed(2)}${t.x >= 0.35 ? ' (or centrosymmetric)' : ''}` });
+      // with a refined model, its sign-carrying result replaces the model-free estimate (absFindings)
+      const modelDecides = lastAbsStructure && lastAbsStructure.applicable;
+      if (!modelDecides && t && t.x >= 0.1 && t.expectedChi2 >= 1.5 && sel && !hallSymbolIsCentrosymmetric(sel.hall)) out.push({ kind: 'inversion', text: `inversion twin, x ≈ ${t.x.toFixed(2)}${t.x >= 0.35 ? ' (or centrosymmetric)' : ''}` });
       return out.length ? out : null;
     }
 
@@ -379,17 +398,27 @@
     }
 
     // Tab badge + banner under the tab bar, visible on every tab.
+    // Absolute structure worth flagging (refined model): inverted or racemic.
+    function absFindings() {
+      const r = lastAbsStructure;
+      if (!r || !r.applicable) return [];
+      const p = r.parsons || r.hooft;
+      const x = r.parsons ? r.parsons.x : r.hooft.y;
+      const v = absStructureVerdict(x, p.su);
+      return v.level === 'bad' || v.level === 'warn' ? [{ kind: 'abs', text: `${r.parsons ? 'Parsons' : 'Hooft'} x = ${fmtSU(x, p.su)} — ${v.text}` }] : [];
+    }
+
     function updateTwinAlerts() {
-      const f = twinFindings();
+      const f = [...(twinFindings() || []), ...absFindings()];
       const btn = document.getElementById('twinTabBtn');
       if (btn) {
-        btn.classList.toggle('twinAlert', !!f);
-        btn.textContent = f ? '3. Twinning ⚠' : '3. Twinning';
+        btn.classList.toggle('twinAlert', f.length > 0);
+        btn.textContent = f.length ? '3. Twins & Abs. Structure ⚠' : '3. Twins & Abs. Structure';
       }
       const banner = document.getElementById('twinBanner');
       if (!banner) return;
-      if (!f) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
-      banner.innerHTML = `<strong>⚠ Twinning found:</strong> ${f.map(x => x.text).join(' · ')} — <a id="twinBannerLink">see the Twinning tab</a>.`;
+      if (!f.length) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+      banner.innerHTML = `<strong>⚠ ${f.every(x => x.kind === 'abs') ? 'Absolute structure' : 'Twinning found'}:</strong> ${f.map(x => x.text).join(' · ')} — <a id="twinBannerLink">see tab 3</a>.`;
       banner.style.display = 'block';
       const link = document.getElementById('twinBannerLink');
       if (link) link.addEventListener('click', () => window.switchTab && window.switchTab('tab-twin'));
@@ -399,7 +428,51 @@
       const el = document.getElementById('twinCheckContainer');
       if (!el) return;
       lastTwinCheck = null;
-      try { renderTwinCheckInner(el); } finally { renderE2TwinNote(); updateTwinAlerts(); }
+      reportState.twinSections = null;
+      try { renderTwinCheckInner(el); } finally { renderE2TwinNote(); updateTwinAlerts(); reportChanged(); }
+    }
+
+    // Tab 3 layout: an overview table (one row per check) and one collapsed
+    // section per check, its verdict in the summary line. A section with a
+    // finding (a twin law to set, an inverted model …) opens by itself. When
+    // the person opens or closes a section, that choice is kept only while the
+    // section's finding stays the same: a new finding, another file or another
+    // space-group candidate with a different verdict opens it again.
+    let twinSecOpen = {}; // id -> { open, sig }
+    const twinSecSig = sec => `${sec.level}|${sec.verdict}`;
+    const fmtSU = (x, su) => {
+      if (!(su > 0) || !Number.isFinite(su)) return x.toFixed(3);
+      let d = Math.max(0, -Math.floor(Math.log10(su)));
+      if (Math.round(su * 10 ** (d + 1)) <= 19) d += 1; // rule of 19: two digits for su 10-19
+      return `${x.toFixed(d)}(${Math.round(su * 10 ** d)})`;
+    };
+    const howToRead = text => `<details class="explain"><summary>How to read this</summary><p><small>${text}</small></p></details>`;
+    function twinSectionHtml(sec) {
+      const auto = sec.level === 'warn' || sec.level === 'bad';
+      const sig = twinSecSig(sec);
+      const kept = twinSecOpen[sec.id];
+      const open = kept && kept.sig === sig ? kept.open : auto;
+      return `<details class="twinSec${sec.level === 'bad' ? ' twinSecBad' : sec.level === 'warn' ? ' twinSecWarn' : ''}" id="twinSec-${sec.id}" data-sig="${sig.replace(/"/g, '&quot;')}" ${open ? 'open' : ''}>
+        <summary><span class="twinSecTitle">${sec.title}</span><span class="twinSecVerdict" style="color:${sec.color}">${sec.verdict}</span></summary>
+        <div class="twinSecBody">${sec.body}</div></details>`;
+    }
+    function twinOverviewHtml(sections) {
+      const rows = sections.map(s => `<tr data-sec="${s.id}"><td><a class="twinSecLink">${s.short}</a></td><td>${s.result || '—'}</td>
+        <td style="color:${s.color}">${s.level === 'bad' ? '⚠ ' : ''}${s.verdict}</td></tr>`).join('');
+      return `<table class="shellTable twinOverview"><thead><tr><th>Check</th><th>Result</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>
+        <p class="twinOverviewNote"><small>Details in the sections below. Nothing is written to the .ins unless you tick it there.</small></p>`;
+    }
+    function bindTwinSections(el) {
+      el.querySelectorAll('details.twinSec > summary').forEach(sm => sm.addEventListener('click', () => {
+        const d = sm.parentElement;
+        twinSecOpen[d.id.replace('twinSec-', '')] = { open: !d.open, sig: d.dataset.sig }; // click fires before the toggle
+      }));
+      el.querySelectorAll('table.twinOverview tr[data-sec]').forEach(tr => tr.addEventListener('click', () => {
+        const d = document.getElementById('twinSec-' + tr.dataset.sec);
+        if (!d) return;
+        d.open = true; twinSecOpen[tr.dataset.sec] = { open: true, sig: d.dataset.sig };
+        d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }));
     }
 
     function renderTwinCheckInner(el) {
@@ -407,25 +480,39 @@
       if (!lastReflections) { el.innerHTML = ''; return; }
       const cell = readCellOrNull();
       if (!cell) { el.innerHTML = '<p><small>Needs all six cell constants.</small></p>'; return; }
-      let html = '';
+      const sections = [merohedralSection(cell), nonMerohedralSection(cell), inversionTwinSection(cell), absStructureSection()];
+      reportState.twinSections = sections;
+      el.innerHTML = twinOverviewHtml(sections) + sections.map(twinSectionHtml).join('');
+      bindTwinSections(el);
+      const nhEl = document.getElementById('nhPlotContainer');
+      if (nhEl && lastTwinCheck && lastTwinCheck.applicable) renderNHPlot(nhEl, lastTwinCheck.laws);
+      const cb = document.getElementById('twinToIns');
+      if (cb) cb.addEventListener('change', () => { twinWriteToIns = cb.checked; if (lastMatchResults) generateIns(); });
+      const cbInv = document.getElementById('invTwinToIns');
+      if (cbInv) cbInv.addEventListener('change', () => { invTwinWriteToIns = cbInv.checked; if (lastMatchResults) generateIns(); });
+      if (lastMatchResults) generateIns();
+    }
+
+    // Merohedral and pseudo-merohedral twins: lattice 2-folds (Le Page) beyond
+    // the Laue class, each tested with the H test (twin-check.js).
+    function merohedralSection(cell) {
+      const sec = { id: 'mero', short: 'Merohedral twins', title: 'Merohedral twins (Le Page, H test)', result: '', verdict: 'none found', color: '#080', level: 'ok', body: '' };
       try {
         const classification = classifyCellMetric(cell);
         const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
         const laue = determinedLaueClass || classification.laueClasses[0];
         const res = checkMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis, observedCenteringName(cachedAbsenceScan().centering));
         lastTwinCheck = res;
-        // lattice 2-fold axes (Le Page) — where the twin laws come from
         const folds = res.folds || [];
-        html += `<h3>Lattice symmetry (Le Page)</h3>
-          <p><small>2-fold axes of the lattice, found independent of the cell choice: a lattice direction [uvw] (nearly) perpendicular to a lattice plane (hkl);
-            the obliquity δ is the angle between them. Laue class ${formatPG(res.laue)}; lattice symmetry <strong>${formatPG(res.holohedry)}</strong> (${res.holohedryNote}).</small></p>`;
+        let html = `<p>Laue class ${formatPG(res.laue)} · lattice symmetry <strong>${formatPG(res.holohedry)}</strong> <small>(${res.holohedryNote})</small></p>`;
         html += folds.length
           ? `<table class="shellTable"><thead><tr><th>Axis [uvw]</th><th>⊥ plane (hkl)</th><th>Obliquity δ</th><th>In the Laue class?</th></tr></thead><tbody>${
               folds.map(f => `<tr><td>[${reducedDirection(f.t).join(' ')}]</td><td>(${reducedDirection(f.h).join(' ')})</td><td>${f.delta.toFixed(3)}°</td>
                 <td>${f.inLaue ? 'yes' : (f.used ? '<strong>no — possible twin law</strong>' : 'no (inconsistent with the others, not used)')}</td></tr>`).join('')}</tbody></table>`
-          : '<p><small>No 2-fold axis within the tolerance.</small></p>';
-        html += '<h3>Twin laws beyond the Laue class (H test)</h3>';
+          : '<p><small>No lattice 2-fold axis within the tolerance.</small></p>';
         if (!res.applicable) {
+          sec.verdict = 'nothing to test'; sec.color = '#888'; sec.level = 'none';
+          sec.result = `lattice = ${formatPG(res.holohedry)}`;
           html += `<p><small>No twin law to test: ${res.reason}.</small></p>`;
         } else {
           const fmtM = M => M.flat().join(' ');
@@ -438,46 +525,50 @@
               <td style="color:${color}">${L.verdict}</td></tr>`;
           }).join('');
           const best = res.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((x, y) => y.alpha - x.alpha)[0];
+          if (best) {
+            sec.result = `<code>TWIN ${fmtM(best.shelxMatrix)}</code>, α ≈ ${best.alpha.toFixed(2)}`;
+            sec.verdict = best.verdict; sec.level = 'warn';
+            sec.color = best.verdict.startsWith('perfect') ? '#b00' : '#b60';
+          } else sec.result = `${res.laws.length} law${res.laws.length === 1 ? '' : 's'} tested`;
           html += `
             <table class="shellTable"><thead><tr><th>Twin law (SHELX)</th><th title="Le Page obliquity: angle between the lattice direction and the reciprocal-lattice normal of the 2-fold axis — 0 = exact (merohedry), small = pseudo-merohedry">Obliquity δ</th>
               <th title="Acentric twin-related pairs, I1+I2 > ${res.laws[0] ? res.laws[0].selection : 10}σ">Pairs</th><th title="Untwinned: 0.5, perfect twin: 0">⟨H⟩</th><th>Twin fraction α</th><th>Verdict</th></tr></thead>
               <tbody>${rows}</tbody></table>
-            <p><small>α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it as start value for BASF and refine.
-              α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub> of ${formatPG(res.holohedry)} on the Laue tab.</small></p>
             ${pseudoTranslationWarning('twin')}
-            <div id="nhPlotContainer"></div>
-            <p><small>N(H): straight lines are ideal twins with fraction α; an observed curve that bends away from them points to pseudo-symmetry rather than a clean twin.</small></p>
-            ${best ? `<p style="color:#b60"><small>Twinning narrows the intensity distribution, so the centrosymmetric/acentric verdict on the E² tab is unreliable for this data set.</small></p>` : ''}
-            ${best ? `<p><label><input type="checkbox" id="twinToIns" ${twinWriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${fmtM(best.shelxMatrix)}</code> with <code>BASF ${best.alpha.toFixed(2)}</code> to the .ins</span></label></p>` : ''}`;
+            ${best ? `<p style="color:#b60"><small>Twinning narrows the intensity distribution: the centrosymmetric/acentric verdict on the E² tab is unreliable here.</small></p>` : ''}
+            ${best ? `<p><label><input type="checkbox" id="twinToIns" ${twinWriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${fmtM(best.shelxMatrix)}</code> with <code>BASF ${best.alpha.toFixed(2)}</code> to the .ins</span></label></p>` : ''}
+            <div id="nhPlotContainer"></div>`;
         }
+        html += howToRead(`If the lattice has (pseudo-)symmetry beyond the Laue class — 2-fold axes found independent of the cell choice (Le Page; obliquity δ
+          = angle between the lattice direction and the plane normal) — the crystal can be twinned by the extra operations. The H test (Yeates 1988) compares
+          twin-related reflection pairs: ⟨H⟩ = 0.5 untwinned, 0 perfect twin. α = ½ − ⟨H⟩ is an estimate: pseudo-symmetry raises it, noise lowers it — use it
+          as start value for BASF and refine. α ≥ 0.40 cannot be told apart from a crystal that simply has the higher symmetry: compare R<sub>int</sub>
+          of ${formatPG(res.holohedry)} on the Laue tab. N(H) plot: straight lines are ideal twins with fraction α; an observed curve that bends away
+          from them points to pseudo-symmetry rather than a clean twin.`);
+        sec.body = html;
       } catch (err) {
-        html += `<p style="color:#b00"><small>Could not run the twin-law check: ${err.message}</small></p>`;
+        sec.verdict = 'check failed'; sec.color = '#b00'; sec.level = 'none';
+        sec.body = `<p style="color:#b00"><small>Could not run the twin-law check: ${err.message}</small></p>`;
       }
-      html += renderNonMerohedralHtml(cell);
-      html += renderInversionTwinHtml(cell);
-      el.innerHTML = html;
-      const nhEl = document.getElementById('nhPlotContainer');
-      if (nhEl && lastTwinCheck && lastTwinCheck.applicable) renderNHPlot(nhEl, lastTwinCheck.laws);
-      const cb = document.getElementById('twinToIns');
-      if (cb) cb.addEventListener('change', () => { twinWriteToIns = cb.checked; if (lastMatchResults) generateIns(); });
-      const cbInv = document.getElementById('invTwinToIns');
-      if (cbInv) cbInv.addEventListener('change', () => { invTwinWriteToIns = cbInv.checked; if (lastMatchResults) generateIns(); });
-      if (lastMatchResults) generateIns();
+      return sec;
     }
 
     // Non-merohedral twins (twin-check.js): lattice 2-folds with 1-6 deg obliquity,
     // H test on the overlapping spots only. Refinement needs HKLF 5 — no checkbox.
     let lastNonMeroCheck = null;
-    function renderNonMerohedralHtml(cell) {
+    function nonMerohedralSection(cell) {
       lastNonMeroCheck = null;
-      let html = '<h3>Non-merohedral twin laws (partial overlap)</h3>';
+      const sec = { id: 'nonmero', short: 'Non-merohedral twins', title: 'Non-merohedral twins (partial overlap)', result: '', verdict: 'none found', color: '#080', level: 'ok', body: '' };
       try {
         const classification = classifyCellMetric(cell);
         const monoclinicAxis = classification.system.includes('c-unique') ? 'c' : 'b';
         const laue = determinedLaueClass || classification.laueClasses[0];
         const res = checkNonMerohedralTwinning(lastReflections, cell, laue, monoclinicAxis, observedCenteringName(cachedAbsenceScan().centering));
         lastNonMeroCheck = res;
-        if (!res.applicable) return html + `<p><small>Nothing to test: ${res.reason}.</small></p>`;
+        if (!res.applicable) {
+          Object.assign(sec, { verdict: 'nothing to test', color: '#888', level: 'none', body: `<p><small>Nothing to test: ${res.reason}.</small></p>` });
+          return sec;
+        }
         const fm = M => M.map(r => r.map(x => x.toFixed(3)).join(' ')).join(' / ');
         const rows = res.laws.map(L => {
           const color = L.verdict.startsWith('twinned') ? '#b60' : L.verdict.startsWith('too few') ? '#888' : '#080';
@@ -485,21 +576,24 @@
             <td><code style="font-size:0.85em">${fm(L.matrix)}</code></td><td>${L.overlaps}</td><td>${L.pairs}</td>
             <td>${L.alpha === null ? '—' : `${L.alpha.toFixed(2)} <small>± ${L.alphaSe.toFixed(3)}</small>`}</td><td style="color:${color}">${L.verdict}</td></tr>`;
         }).join('');
-        html += `<p><small>Lattice 2-fold axes with an obliquity of 1–6° map the lattice onto itself only approximately: the spots of both domains overlap only where the rotated
-            reciprocal-lattice point lands within ${res.overlapTolerance} Å⁻¹ of another one (mostly at low angle). The H test is run on those overlapping pairs only; the rotation is tried about the
-            direct row and about the reciprocal row. Pseudo-symmetry makes intensities similar at any distance, a twin only where the spots overlap — untwinned test data stay at α ≈ 0.</small></p>
-          <table class="shellTable"><thead><tr><th>Twin law</th><th>Obliquity δ</th><th>Matrix h′ = M h (rows)</th><th title="Reflections whose twin image lies within the overlap tolerance">Overlapping</th>
+        const nm = res.laws.find(L => L.verdict.startsWith('twinned'));
+        sec.result = nm ? `2-fold about ${nm.about === 'direct' ? `[${reducedDirection(nm.axis).join(' ')}]` : `(${reducedDirection(nm.plane).join(' ')})*`}, δ ${nm.delta.toFixed(1)}°, α ≈ ${nm.alpha.toFixed(2)}`
+          : `${res.laws.length} axis${res.laws.length === 1 ? '' : 'es'} tested`;
+        if (nm) Object.assign(sec, { verdict: 'twinned — needs HKLF 5', color: '#b60', level: 'warn' });
+        let html = `<table class="shellTable"><thead><tr><th>Twin law</th><th>Obliquity δ</th><th>Matrix h′ = M h (rows)</th><th title="Reflections whose twin image lies within the overlap tolerance">Overlapping</th>
             <th title="Overlapping pairs with both partners measured, I1+I2 > 10σ">Pairs</th><th>Fraction α (overlaps)</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>`;
-          html += pseudoTranslationWarning('twin');
-        if (res.laws.some(L => L.verdict.startsWith('twinned'))) {
-          html += `<p style="color:#b60"><small><strong>A non-merohedral twin needs an HKLF 5 reflection file</strong> (each overlapping reflection with both components), e.g. from PLATON (TwinRotMat, after a first refinement)
-            or TWINABS. A TWIN instruction with a rounded matrix in HKLF 4 mode would treat every reflection as overlapped — wrong at higher angle — so the .ins gets nothing from here.
-            α refers to the overlapping reflections only; the refined BASF over all data is usually lower.</small></p>`;
-        }
+        html += pseudoTranslationWarning('twin');
+        if (nm) html += `<p style="color:#b60"><small><strong>A non-merohedral twin needs an HKLF 5 reflection file</strong> (each overlapping reflection with both components), e.g. from PLATON (TwinRotMat, after a first refinement)
+            or TWINABS — a TWIN matrix in HKLF 4 mode would treat every reflection as overlapped, so the .ins gets nothing from here.</small></p>`;
+        html += howToRead(`Lattice 2-fold axes with an obliquity of 1–6° map the lattice onto itself only approximately: the spots of both domains overlap only where the rotated
+          reciprocal-lattice point lands within ${res.overlapTolerance} Å⁻¹ of another one (mostly at low angle). The H test is run on those overlapping pairs only; the rotation is tried about the
+          direct row and about the reciprocal row. Pseudo-symmetry makes intensities similar at any distance, a twin only where the spots overlap — untwinned test data stay at α ≈ 0.
+          α refers to the overlapping reflections only; the refined BASF over all data is usually lower.`);
+        sec.body = html;
       } catch (err) {
-        html += `<p style="color:#b00"><small>Could not run the non-merohedral check: ${err.message}</small></p>`;
+        Object.assign(sec, { verdict: 'check failed', color: '#b00', level: 'none', body: `<p style="color:#b00"><small>Could not run the non-merohedral check: ${err.message}</small></p>` });
       }
-      return html;
+      return sec;
     }
 
     // Inversion (racemic) twinning from the Bijvoet pairs (anomalous-check.js).
@@ -534,14 +628,15 @@
         : 'the wavelength is none of the tabulated lines (Ti, Cr, Fe, Co, Cu, Mo, Ag, W, Au, U Kα)';
       return { fpp: any ? fpp : null, source: parts.join('; '), note };
     }
-    function renderInversionTwinHtml(cell) {
-      let html = '<h3>Inversion (racemic) twinning — Bijvoet pairs</h3>';
-      if (!lastMatchResults || !lastMatchResults.length) return html + '<p><small>Available once the space-group candidates are matched.</small></p>';
+    function inversionTwinSection(cell) {
+      const sec = { id: 'bijvoet', short: 'Inversion twin (model-free)', title: 'Inversion twin — Bijvoet pairs, model-free', result: '', verdict: '', color: '#888', level: 'none', body: '' };
+      const absNote = lastAbsStructure && lastAbsStructure.applicable ? `<p><small>A refined model is loaded: the section below gives x <em>with</em> sign (Flack, Parsons, Hooft).</small></p>` : '';
+      if (!lastMatchResults || !lastMatchResults.length) return Object.assign(sec, { verdict: 'waiting for the space group', body: '<p><small>Available once the space-group candidates are matched.</small></p>' });
       const sel = lastMatchResults[selectedCandidateIndex];
       const acentric = r => !hallSymbolIsCentrosymmetric(r.entry.hall);
       const ref = acentric(sel) ? sel
         : (lastMatchResults.find(r => r.score === sel.score && acentric(r)) || lastMatchResults.find(acentric));
-      if (!ref) return html + '<p><small>No acentric candidate — inversion twinning does not apply.</small></p>';
+      if (!ref) return Object.assign(sec, { verdict: 'not applicable', body: '<p><small>No acentric candidate — inversion twinning does not apply.</small></p>' });
       try {
         const ops = generateSpaceGroupOperators(ref.entry.hall);
         const pointGroup = [...new Map(ops.map(o => [o.R.map(r => r.join(',')).join(';'), o.R])).values()];
@@ -549,23 +644,24 @@
         const fppInfo = effectiveFpp(comp ? comp.composition : null);
         const res = checkAnomalousSignal(lastReflections, cell, pointGroup, fppInfo.fpp, comp ? comp.composition : null);
         lastAnomalousCheck = res;
-        if (!res.enough) return html + `<p><small>Only ${res.pairs} Bijvoet pairs (Friedel mates measured separately) — not enough. Merged data with Friedel pairs averaged carry no anomalous information.</small></p>`;
+        if (!res.enough) return Object.assign(sec, { verdict: 'too few Bijvoet pairs', result: `${res.pairs} pairs`,
+          body: `<p><small>Only ${res.pairs} Bijvoet pairs (Friedel mates measured separately) — not enough. Merged data with Friedel pairs averaged carry no anomalous information.</small></p>` });
         const pgNote = ref === sel ? `point group of ${formatHM(ref.entry.hm)}` : `point group of the acentric candidate ${formatHM(ref.entry.hm)} (${formatHM(sel.entry.hm)} is centrosymmetric)`;
         const sigmaNote = res.calibrated
-          ? (res.sigmaScale > 1.05 ? `σ scaled ×${Math.sqrt(res.sigmaScale).toFixed(2)} to match the scatter of repeated measurements` : 'σ consistent with repeated measurements')
+          ? (res.sigmaScale > 1.05 ? `σ scaled ×${Math.sqrt(res.sigmaScale).toFixed(2)} to match repeated measurements` : 'σ consistent with repeated measurements')
           : 'σ not calibrated (merged data)';
-        html += `<p>${res.pairs} Bijvoet pairs (${pgNote}; ${sigmaNote}).<br>
+        let html = `<p>${res.pairs} Bijvoet pairs <small>(${pgNote}; ${sigmaNote})</small><br>
           Observed anomalous signal: χ² = <strong>${res.chi2.toFixed(2)}</strong> <small>(1 = noise only)</small>`;
+        sec.result = `χ² = ${res.chi2.toFixed(2)}`;
         if (res.twin) {
           const t = res.twin;
-          const color = t.verdict.startsWith('enantiopure') ? '#080' : t.verdict.startsWith('partial') ? '#b60' : t.verdict.startsWith('racemic') ? '#b00' : '#888';
+          sec.color = t.verdict.startsWith('enantiopure') ? '#080' : t.verdict.startsWith('partial') ? '#b60' : t.verdict.startsWith('racemic') ? '#b00' : '#888';
+          sec.verdict = t.verdict.startsWith('enantiopure') ? 'enantiopure' : t.verdict.startsWith('partial') ? 'partial inversion twin' : t.verdict.startsWith('racemic') ? 'racemic twin or centrosymmetric' : 'signal too weak to judge';
+          sec.level = t.verdict.startsWith('enantiopure') ? 'ok' : t.verdict.startsWith('partial') || t.verdict.startsWith('racemic') ? 'warn' : 'none';
+          sec.result += ` · x ≈ ${t.x.toFixed(2)} ± ${t.xSe.toFixed(2)}`;
           html += ` · expected without inversion twinning: χ² ≈ ${t.expectedChi2.toFixed(1)}<br>
-            Estimated inversion-twin fraction: <strong>x ≈ ${t.x.toFixed(2)}</strong> <small>± ${t.xSe.toFixed(2)}</small> —
-            <span style="color:${color}">${t.verdict}</span></p>
-            <p><small>From observed/expected Bijvoet differences ≈ |1 − 2x| (f″ ${fppInfo.source}, composition ${comp ? comp.source : ''}). Like the Flack parameter but without a model, so without sign:
-            x and 1 − x look the same, and a 50:50 racemic twin is indistinguishable from a centrosymmetric structure.
-            ${lastTwinCheck && lastTwinCheck.applicable && lastTwinCheck.laws.some(L => L.verdict === 'twinned') ? ' Combined with the twin law above the two effects mix — rough indication only.' : ''}
-            Refine the Flack parameter (or BASF) to get the real value.</small></p>`;
+            Inversion-twin fraction: <strong>x ≈ ${t.x.toFixed(2)}</strong> <small>± ${t.xSe.toFixed(2)}</small> — <span style="color:${sec.color}">${t.verdict}</span></p>
+            ${lastTwinCheck && lastTwinCheck.applicable && lastTwinCheck.laws.some(L => L.verdict === 'twinned') ? '<p style="color:#b60"><small>Combined with the twin law above the two effects mix — rough indication only.</small></p>' : ''}`;
           if (t.x >= 0.1 && t.expectedChi2 >= 1.5) {
             html += ref === sel
               ? `<p><label><input type="checkbox" id="invTwinToIns" ${invTwinWriteToIns ? 'checked' : ''}> <span>write the inversion twin (<code>TWIN</code>, <code>BASF ${t.x.toFixed(2)}</code>) to the .ins</span></label></p>`
@@ -575,17 +671,124 @@
           const why = !fppInfo.fpp ? `no f″ values — they come from a CIF (<code>_atom_type_scat_dispersion_imag</code>) or, for Ti, Cr, Fe, Co, Cu, Mo, Ag, W, Au and U Kα, from the built-in table (ITA Vol. C 4.2.6.8)${fppInfo.note ? ` (${fppInfo.note})` : ''}`
             : !comp ? 'no composition (formula + Z or a .ins)'
             : `f″ missing for ${res.missingFpp.join(', ') || 'the anomalous scatterers'}`;
+          sec.verdict = res.acentricEvidence === 'strong' ? 'acentric, not 50:50' : 'expected signal unknown';
+          sec.color = res.acentricEvidence === 'strong' ? '#080' : '#888';
           html += `</p><p><small>The expected signal cannot be computed (${why}), so a racemic twin cannot be told apart from a structure with only light atoms.
             ${res.acentricEvidence === 'strong' ? 'The clear anomalous signal shows the structure is acentric and not a 50:50 racemic twin.' : ''}</small></p>`;
         }
         if (res.acentricEvidence === 'strong' && hallSymbolIsCentrosymmetric(sel.entry.hall)) {
+          Object.assign(sec, { verdict: `Friedel's law broken — ${formatHM(sel.entry.hm)} probably wrong`, color: '#b00', level: 'bad' });
           html += `<p style="color:#b00"><strong>⚠ Friedel's law is clearly broken (χ² = ${res.chi2.toFixed(1)}), which no centrosymmetric structure can do — the selected ${formatHM(sel.entry.hm)} is probably wrong;
             consider ${formatHM(ref.entry.hm)}.</strong> <small>(Unless absorption or scaling errors are large.)</small></p>`;
         }
+        if (absNote && sec.level !== 'bad') {
+          // the refined model decides; open this section only if it finds an inversion twin (the TWIN/BASF box is here)
+          const a = lastAbsStructure, p = a.parsons || a.hooft;
+          const absTwin = p && absStructureVerdict(a.parsons ? a.parsons.x : a.hooft.y, p.su).level === 'warn';
+          sec.level = absTwin ? 'warn' : 'none';
+          if (!absTwin) sec.color = '#888';
+          sec.verdict += ' <small>(refined model below decides)</small>';
+        }
+        html += absNote;
+        html += howToRead(`Compares the Bijvoet differences I(h) − I(−h) with the anomalous signal expected from the composition (f″ ${fppInfo.source || '—'}${comp ? `, composition ${comp.source}` : ''}).
+          The ratio observed/expected ≈ |1 − 2x|. Like the Flack parameter, but without a model and therefore without sign: x and 1 − x look the same, and a 50:50
+          racemic twin cannot be told apart from a centrosymmetric structure. A clear excess over χ² = 1 means the structure is acentric, whatever the E² statistics
+          (tab 5) say — a useful cross-check when twinning or a heavy atom makes E² look centrosymmetric. Refine the Flack parameter (or BASF) to get the real value.`);
+        sec.body = html;
       } catch (err) {
-        html += `<p style="color:#b00"><small>Could not run the Bijvoet check: ${err.message}</small></p>`;
+        Object.assign(sec, { verdict: 'check failed', color: '#b00', body: `<p style="color:#b00"><small>Could not run the Bijvoet check: ${err.message}</small></p>` });
       }
-      return html;
+      return sec;
+    }
+
+    // Absolute structure from the refined model of a final CIF (abs-structure.js).
+    // Computed once per loaded CIF, deferred so the tab renders first.
+    let lastModelCif = null;      // { text, reflections } of the loaded CIF, or null
+    let lastAbsStructure = null;  // result of computeAbsoluteStructure, or null while pending
+    let absStructureJob = null;   // the lastModelCif being computed right now
+    let absProgress = { text: 'Starting…', frac: 0 };
+    // progress shown in place (no re-render), in the overview row and the section
+    function showAbsProgress(text, frac) {
+      absProgress = { text, frac };
+      document.querySelectorAll('.absProgressText').forEach(el => { el.textContent = text; });
+      document.querySelectorAll('.absProgressBar').forEach(el => { el.value = frac; });
+    }
+    function absStructureSection() {
+      const sec = { id: 'abs', short: 'Absolute structure', title: 'Absolute structure — refined model (Flack, Parsons, Hooft)', result: '', verdict: '', color: '#888', level: 'none', body: '' };
+      const needCif = `Load the final CIF of the refinement: it holds the model (<code>_shelx_res_file</code>) and the unmerged reflections (<code>_shelx_hkl_file</code>).`;
+      if (!lastModelCif || lastModelCif.reflections !== lastReflections) return Object.assign(sec, { verdict: 'needs the final CIF', result: '—', body: `<p><small>${needCif}</small></p>` });
+      if (!lastAbsStructure) {
+        if (absStructureJob !== lastModelCif) {
+          const job = lastModelCif;
+          absStructureJob = job;
+          absProgress = { text: 'Starting…', frac: 0 };
+          setTimeout(async () => {
+            let r;
+            try { r = await computeAbsoluteStructure(job.text, job.reflections, (t, f) => { if (absStructureJob === job) showAbsProgress(t, f); }); }
+            catch (err) { r = { applicable: false, reason: `could not read the model — ${err.message}` }; }
+            if (absStructureJob !== job) return; // a newer CIF took over; its own job is running
+            absStructureJob = null;
+            lastAbsStructure = r;
+            renderTwinCheck();
+          }, 30);
+        }
+        return Object.assign(sec, {
+          verdict: '<span class="spinner" aria-hidden="true"></span> computing…',
+          result: `<span class="absProgressText">${absProgress.text}</span>`,
+          body: `<p class="absBusy"><span class="spinner" aria-hidden="true"></span> <span class="absProgressText">${absProgress.text}</span></p>
+            <progress class="absProgressBar" max="1" value="${absProgress.frac}"></progress>
+            <p><small>Structure factors for every reflection of the model, then Parsons, Flack and Hooft (the Student-t fit takes a few seconds for large data sets).</small></p>` });
+      }
+      const r = lastAbsStructure;
+      const rep = r.reported;
+      const repText = rep && rep.flack ? `${rep.flack.raw}${rep.flackIsParsons ? ' (Parsons)' : ''}` : null;
+      if (!r.applicable) {
+        Object.assign(sec, { verdict: r.missingModel ? 'needs the final CIF' : 'not computed', result: repText ? `CIF: x = ${repText}` : '—',
+          body: `<p><small>${r.missingModel ? `This CIF has no refined model. ${needCif}` : `Not computed: ${r.reason}.`}</small></p>${repText ? `<p>Value in the CIF: <strong>x = ${repText}</strong>${rep.details ? ` <small>— ${rep.details}</small>` : ''}</p>` : ''}` });
+        return sec;
+      }
+      const main = r.parsons || r.hooft;
+      const mainX = r.parsons ? r.parsons.x : r.hooft.y;
+      const v = absStructureVerdict(mainX, main.su);
+      Object.assign(sec, { verdict: v.text, color: v.color, level: v.level === 'bad' ? 'bad' : v.level === 'warn' ? 'warn' : v.level === 'ok' ? 'ok' : 'none' });
+      sec.result = [r.parsons ? `Parsons ${fmtSU(r.parsons.x, r.parsons.su)}` : null, r.hooft ? `Hooft ${fmtSU(r.hooft.y, r.hooft.su)}` : null].filter(Boolean).join(' · ');
+      const row = (name, val, su, n) => {
+        const vv = absStructureVerdict(val, su);
+        return `<tr><td>${name}</td><td><strong>${fmtSU(val, su)}</strong></td><td>${n ?? '—'}</td><td style="color:${vv.color}">${vv.text}</td></tr>`;
+      };
+      let html = `<table class="shellTable"><thead><tr><th>Method</th><th>x (su)</th><th>Pairs / refl.</th><th>Verdict</th></tr></thead><tbody>
+        ${r.parsons ? row('Parsons quotients', r.parsons.x, r.parsons.su, r.parsons.n) : ''}
+        ${r.hooft ? row('Hooft y', r.hooft.y, r.hooft.su, r.hooft.n) : ''}
+        ${r.flack ? row('Flack, classical <small>(model fixed)</small>', r.flack.x, r.flack.su, r.flack.n) : ''}
+        ${rep && rep.flack ? `<tr><td>In the CIF <small>(${rep.flackIsParsons ? 'SHELXL, Parsons' : '_refine_ls_abs_structure_Flack'})</small></td><td><strong>${rep.flack.raw}</strong></td><td>${rep.nQuotients ?? '—'}</td><td></td></tr>` : ''}
+        </tbody></table>`;
+      if (r.hooft) {
+        const f3 = v => v === null ? 'n/a' : v.toFixed(3);
+        html += `<p><small>Hooft: P2(true) = ${f3(r.hooft.p2true)} · P3(true) = ${f3(r.hooft.p3true)}, P3(racemic twin) = ${f3(r.hooft.p3twin)}, P3(false) = ${f3(r.hooft.p3false)}
+          · Student-t ν = ${r.hooft.nu.toFixed(1)}, probability-plot slope ${r.hooft.slope.toFixed(2)} (CC ${r.hooft.cc.toFixed(3)})</small></p>`;
+      }
+      const notes = [];
+      const cifR1 = rep && rep.r1 ? rep.r1.value : null;
+      const r1Bad = r.r1 !== null && cifR1 !== null && r.r1 > Math.max(2 * cifR1, cifR1 + 0.05);
+      notes.push(`<small>Model: ${r.nAtoms} atoms, ${r.nOps} operators, ${r.nUnique} unique reflections (Friedel mates separate, systematic absences left out), R1 recomputed = ${r.r1 !== null ? r.r1.toFixed(3) : '—'}${cifR1 !== null ? ` (CIF: ${cifR1.toFixed(3)})` : ''}.</small>`);
+      if (r1Bad) notes.push(`<small style="color:#b00"><strong>⚠ R1 is far above the CIF value:</strong> model and reflections do not fit together here (different setting, HKLF 5, or a feature not supported) — treat the values above with care.</small>`);
+      if (v.level === 'bad') notes.push(`<small style="color:#b00"><strong>Invert the model:</strong> in SHELXL <code>MOVE 1 1 1 -1</code> before the atoms; in a space group with a chiral screw axis (P4₁, P3₁21, P6₁ …) also change to the enantiomorph (P4₃, P3₂21, P6₅ …).</small>`);
+      if ((mainX < -3 * main.su || mainX > 1 + 3 * main.su) && main.su <= 0.1) notes.push(`<small>x lies ${mainX < 0 ? 'below 0' : 'above 1'} by more than 3 su — not a twin, but a sign of systematic errors (absorption, scaling) or an su that is too small.</small>`);
+      if (r.inversionTwin) notes.push(`<small>Refined as an inversion twin (TWIN, BASF ${r.basf.length ? r.basf.map(b => b.toFixed(3)).join(', ') : '—'}): x should come out near BASF.</small>`);
+      if (r.dispersion.missing.length) notes.push(`<small style="color:#b60">No f″ for ${r.dispersion.missing.join(', ')} — taken as 0.</small>`);
+      if (r.dispersion.fromTable.length) notes.push(`<small>f″ for ${r.dispersion.fromTable.join(', ')} from ITA Vol. C 4.2.6.8 (not in the CIF), f′ = 0.</small>`);
+      if (main.su > 0.1) notes.push(`<small style="color:#b60">Weak anomalous signal (su > 0.1)${r.dispersion.missing.length ? '' : ' — light atoms only'}: Cu Kα, longer exposure or a heavier atom (e.g. a salt) would help.</small>`);
+      html += `<p>${notes.join('<br>')}</p>`;
+      html += howToRead(`All three compare the Bijvoet pairs I(h), I(−h) with |Fc(h)|², |Fc(−h)|² of the refined model and so have a sign: x ≈ 0 correct hand, x ≈ 1 inverted,
+        x ≈ ½ racemic twin. <strong>Parsons</strong> (2013): fit of the quotients (I⁺ − I⁻)/(I⁺ + I⁻) — what SHELXL writes as the Flack x, so the two should agree closely;
+        su scaled by the goodness of fit. <strong>Hooft y</strong> (2008–2010): Bayesian fit of the Bijvoet differences with a Student-t likelihood, done as in PLATON — ν and the σ scale
+        (slope) come from the Student-t probability plot of the residuals; P2 compares "correct" with "inverted", P3 adds the racemic twin. PLATON reads
+        SHELXL's merged σ from the .fcf, this page merges the reflections itself, so ν and the last digit of y can differ a little.
+        <strong>Flack, classical</strong>: x and the scale fitted to all acentric reflections with the model held fixed and the WGHT weights of the .res;
+        a full refinement also frees the other parameters, so its su is larger and x can differ by a few su. Rule of thumb (Flack &amp; Bernardinelli 2000):
+        su ≤ 0.1 is enough when x is near 0, su ≤ 0.04 when the compound might be a racemate. Not covered: twin laws other than inversion, HKLF 5, SWAT.`);
+      sec.body = html;
+      return sec;
     }
 
     // Twin instructions for the .ins (ticked boxes, significant results), or null:
@@ -685,6 +888,7 @@
             relevance = conditionsRelevantForLaue(relLaue, cls.system.includes('c-unique') ? 'c' : 'b');
           }
         } catch (err) { relevance = null; }
+        reportState.absences = { scan, relevance, laue: relLaue };
         const pseudoNote = `<br><small style="color:#b90" title="Holds in the data, but no space group of Laue class ${formatPGText(relLaue)} has this condition: an approximate (pseudo-)symmetry of the structure, not a systematic absence. These reflections are not treated as forbidden.">pseudo-symmetry — impossible in Laue class ${formatPG(relLaue)}</small>`;
         const zonalRows = Object.entries(scan.zonal).flatMap(([zone, results]) =>
           results.map((r, i) => `<tr><td>${i === 0 ? (zone === 'hhl' ? 'hhl (diagonal plane)' : zone) : ''}</td><td>${i === 0 ? r.reflectionCount : ''}</td><td>${r.name}${
@@ -761,7 +965,7 @@
         <p><strong>Laue class candidates:</strong> ${classification.laueClasses.map(formatPG).join(', ')}</p>
         <p><small>Based on cell metric only — the actual Laue class still needs to be confirmed by comparing merging statistics for each candidate (next step).</small></p>`;
     }
-    Object.values(cellFields).forEach(field => field.addEventListener('input', updateCellMetricClassification));
+    Object.values(cellFields).forEach(field => field.addEventListener('input', () => { cellEditedByHand = true; updateCellMetricClassification(); }));
     // For raw HKL (no cell in the file): once all six values are filled in
     // by hand and the field loses focus, run the same auto-pipeline that
     // fires automatically after a CIF load — 'change' (not 'input') so it
@@ -914,6 +1118,7 @@
       const zi = currentZ(formula);
       const lam = currentWavelength();
       zInput.placeholder = zi.estimated ? `≈ ${zi.z}` : '';
+      reportState.crystal = null;
       if (!cell) {
         crystalDataResultEl.innerHTML = `<p><small>Enter or load the cell to see Z estimate, density, F(000) and μ.</small></p>`;
         zPrimeBoxEl.innerHTML = '';
@@ -952,6 +1157,7 @@
 
       const size = sizeInputs.map(i => parseFloat(i.value));
       const cd = computeCrystalData({ volume, composition, z: zi.z, formula, wavelength: lam.value, size });
+      reportState.crystal = cd && !cd.unknown ? { volume, composition, compNote, cd, det, zi, size } : null;
       if (cd && cd.unknown) {
         parts.push(`<p style="color:var(--error)"><small>Unknown element symbol(s): ${cd.unknown.join(', ')} — no crystal data calculated.</small></p>`);
         crystalDataResultEl.innerHTML = parts.join('');
@@ -1062,6 +1268,7 @@
       cellFields.beta.value = cell.beta;
       cellFields.gamma.value = cell.gamma;
       cellNoteEl.innerHTML = `<p><em>Filled in from CIF — edit if needed.</em></p>`;
+      cellEditedByHand = false;
 
       const extras = [];
       if (cell.z !== null) extras.push(`Z = ${cell.z}`);
@@ -1096,6 +1303,7 @@
       cellFields.beta.value = insData.cell.beta;
       cellFields.gamma.value = insData.cell.gamma;
       cellNoteEl.innerHTML = `<p><em>Cell filled in from .ins — edit if needed.</em></p>`;
+      cellEditedByHand = false;
 
       lastInsComposition = insData.composition;
       lastCellExtras = { ...(lastCellExtras || {}), wavelength: insData.wavelength, z: insData.z, esd: insData.esd };
@@ -1155,6 +1363,7 @@
       cellFields.beta.value = p4pData.cell.beta;
       cellFields.gamma.value = p4pData.cell.gamma;
       cellNoteEl.innerHTML = `<p><em>Cell filled in from .p4p — edit if needed.</em></p>`;
+      cellEditedByHand = false;
 
       // .p4p gives a formula (per formula unit, like a CIF), not an exact
       // whole-cell SFAC/UNIT count like a .ins — don't let a stale exact
@@ -1184,6 +1393,12 @@
     async function handleFile(file) {
       if (!file) return;
       const text = await file.text();
+      lastFileMeta = {
+        name: file.name || '(unnamed)', size: file.size,
+        modified: file.lastModified ? new Date(file.lastModified) : null,
+        // of the file's bytes, so it matches sha256sum / Get-FileHash
+        sha256: typeof sha256Hex === 'function' ? sha256Hex(new Uint8Array(await file.arrayBuffer())) : null,
+      };
       if (file.name) lastLoadedFileBaseName = file.name.replace(/\.[^./\\]+$/, ''); // strip extension (.hkl/.cif/.ins/.p4p/...)
 
       // A .p4p (Bruker/CrysAlisPro orientation-matrix export) carries cell +
@@ -1249,9 +1464,16 @@
 
       const { reflections, skipped, source } = result;
       lastReflections = reflections;
+      // a final CIF may carry the refined model for the absolute structure (tab 3)
+      lastModelCif = looksLikeCIF(text) ? { text, reflections } : null;
+      lastAbsStructure = null;
+      absStructureJob = null; // a running job for an earlier file is dropped when it finishes
+      twinSecOpen = {};       // new data: every section opens or closes by its own finding again
       noteLoaded('reflections', file.name, `(${reflections.length} refl.)`);
       determinedLaueClass = null;
       determinedLaueClassSource = null;
+      // results of the previous data set must not end up in this one's report
+      for (const k of ['laue', 'shell', 'twinSections', 'absences', 'sg', 'estat', 'ins']) reportState[k] = null;
       laueResultEl.innerHTML = '';
       absencesResultEl.innerHTML = '';
       spaceGroupResultEl.innerHTML = '';
@@ -1467,6 +1689,8 @@
         // instead of quietly trusting it.
         determinedLaueClass = cifLaueClass || (redundancyInformative ? chosen : null);
         determinedLaueClassSource = cifLaueClass ? 'cif' : (redundancyInformative ? 'merging' : null);
+        reportState.laue = { system: classification.system, evaluations, chosen, jumpDetectedAt, redundancyInformative,
+          cifLaueClass, determined: determinedLaueClass, source: determinedLaueClassSource };
 
         const rows = evaluations.map(r => `
           <tr ${r.laueClass === chosen ? 'style="font-weight:bold;background:#f3fbf6;"' : ''}>
@@ -1529,6 +1753,7 @@
         insResultEl.innerHTML = '';
         insActionsEl.style.display = 'none';
         lastGeneratedIns = null;
+        reportState.ins = null;
         document.getElementById('sgDiagramBox').innerHTML = '';
         return;
       }
@@ -1619,17 +1844,17 @@
                <strong>Compute E² statistics</strong> on the Space Group tab, then select whichever row it points to.</p>`)
         : '';
 
-      // Twinning found on the Twinning tab but not (all) written to this .ins
+      // Twinning found on tab 3 but not (all) written to this .ins
       const findings = twinFindings() || [];
       const written = twinForIns();
       const nonMero = findings.filter(x => x.kind === 'nonmero');
       const nonMeroInsNote = nonMero.length
-        ? `<p style="color:#b60"><strong>⚠ ${nonMero.map(x => x.text).join(' · ')}</strong> — this .ins (HKLF 4) cannot handle it; refine against an HKLF 5 file (PLATON TwinRotMat or TWINABS). See the <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">Twinning tab</a>.</p>`
+        ? `<p style="color:#b60"><strong>⚠ ${nonMero.map(x => x.text).join(' · ')}</strong> — this .ins (HKLF 4) cannot handle it; refine against an HKLF 5 file (PLATON TwinRotMat or TWINABS). See <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">tab 3</a>.</p>`
         : '';
       const notWritten = findings.filter(x => x.kind !== 'nonmero').filter(x => x.kind === 'law' ? !(written && written.matrix.flat().join(' ') !== '-1 0 0 0 -1 0 0 0 -1')
         : !(written && (written.n === -4 || written.matrix.flat().join(' ') === '-1 0 0 0 -1 0 0 0 -1'))).filter(x => x.kind === 'law' || !hallSymbolIsCentrosymmetric(top.hall));
       const twinInsNote = notWritten.length
-        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${notWritten.map(x => x.text).join(' · ')} — tick it on the <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">Twinning tab</a> to add TWIN/BASF.</p>`
+        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${notWritten.map(x => x.text).join(' · ')} — tick it on <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">tab 3</a> to add TWIN/BASF.</p>`
         : '';
 
       const settingNote = settingTransform
@@ -1648,8 +1873,11 @@
         ${zNote}
         <pre style="background:#f7f7f7; padding:0.8rem; border:1px solid #ddd; overflow-x:auto;">${ins}</pre>`;
       lastGeneratedIns = ins;
+      reportState.ins = { text: ins, entry: top, settingTransform, twin: twinForIns(), tiedOpposite: tiedOpposite || null,
+        notes: { tie: tieNote, twin: twinInsNote, nonMero: nonMeroInsNote, missing: missingNote, lambda: lambdaNote, z: zNote } };
       insActionsEl.style.display = 'flex';
       insCopyNoteEl.textContent = '';
+      reportChanged();
     }
 
     // Tab 7: "Save as .hkl" block, visible only while lastHklExport is set.
@@ -1885,6 +2113,14 @@
               as a proposal — the refinement (R1, Flack parameter, ADDSYM in PLATON) has the last word.</small></p>`
           : '';
 
+        reportState.sg = {
+          targetLaueClass, laueClassNote, results, extraRow,
+          sameAbsences, sameAbsencesHasBoth,
+          tiedOpposite: tieWarning ? tiedOpposite : null,
+          unresolved,
+          runnerUps: closeRows.map(r => ({ r, bad: decisiveAgainst(r).map(describeContradiction) })).filter(x => x.bad.length).slice(0, 5),
+          settingOf: entry => describeSetting(entry),
+        };
         spaceGroupResultEl.innerHTML = `
           <h2>Space group candidates</h2>
           <p><small>Assumed Laue class: ${formatPG(targetLaueClass)} (${laueClassNote})</small></p>
@@ -1963,6 +2199,7 @@
 
         const compInfo = getUnitCellComposition();
         if (!compInfo) {
+          reportState.estat = { error: 'no composition (formula + Z, or a SHELX .ins)' };
           eStatResultEl.innerHTML = `<p style="color:#b00">Need the unit cell's element composition first — either drop the matching
             SHELX .ins (exact SFAC/UNIT counts), or fill in the chemical formula field on the File &amp; Cell tab (also needs Z, e.g. from a loaded CIF) — the statistics then appear here automatically.</p>`;
           resolve(false);
@@ -1983,11 +2220,15 @@
         const stats = computeEStatistics(latticeInfo.reflections, values, compInfo.composition, group, latticeInfo.allowedTest);
 
         if (stats.error) {
+          reportState.estat = { error: stats.error };
           eStatResultEl.innerHTML = `<p style="color:#b00">${stats.error}</p>`;
           resolve(false);
           return;
         }
 
+        lastEStatVerdict = stats.verdict;
+        reportState.estat = { stats, compInfo, laue: targetLaueClass, laueSource: determinedLaueClassSource, lattice: latticeInfo.note };
+        renderE2TwinNote();
         const ref = WILSON_REFERENCE;
         const verdictColor = stats.verdict === 'centrosymmetric' ? '#080' : '#06c';
         const nzColor = stats.nz.closest === 'centrosymmetric' ? '#080' : (stats.nz.closest === 'acentric' ? '#06c' : '#b60');
@@ -2037,6 +2278,8 @@
           }
         }
 
+        reportState.estat.autoSelect = autoSelectNote;
+        reportState.estat.nzNote = nzNote;
         // --- per-shell E² statistics (table + plot container + reading) ---
         let eShellHtml = '';
         const es = stats.eShells;
@@ -2105,6 +2348,7 @@
         renderWilsonPlot(document.getElementById('wilsonPlotContainer'), stats.wilsonPoints, stats.B, stats.k);
         renderNZPlot(document.getElementById('nzPlotContainer'), stats.nz);
         if (eShellHtml) renderEShellPlot(document.getElementById('eShellPlotContainer'), es);
+        reportChanged();
         resolve(true);
         }, 10);
       });

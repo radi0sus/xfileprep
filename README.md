@@ -8,15 +8,17 @@ Runs entirely client-side: open `index.html` in a browser. No server, no build s
 
 1. **File & Cell** — Load reflections (SHELX `.hkl`, CIF with a `_refln` loop or an embedded `_shelx_hkl_file`), a `.ins`/`.res` or a `.p4p`. Cell, wavelength, formula, Z and crystal size are taken from the files where available and can be edited. A crystal-data block shows the Z estimate, formula weight, density, F(000), Z′, μ, the f″ of each element and, with a crystal size, μ·r and the expected T<sub>min</sub>/T<sub>max</sub>.
 2. **Laue Symmetry** — R<sub>int</sub> for each Laue class the metric allows. Intensity-weighted reciprocal-lattice planes and a layer viewer (hk*L*, h*K*l, *H*kl) that marks gaps in the data, optionally completed from symmetry equivalents. Merging statistics per resolution shell: completeness, redundancy, ⟨I/σ⟩, CC½, R<sub>int</sub>, R<sub>meas</sub>, R<sub>pim</sub>.
-3. **Twinning** — Its own tab, because twinning is easy to miss; findings are flagged on every tab.
+3. **Twins & Abs. Structure** — Its own tab, because twinning and an inverted model are easy to miss; findings are flagged on every tab. An overview table gives one line per check; the details sit in collapsible sections that open by themselves when something is wrong.
    - Lattice symmetry beyond the Laue class (Le Page search for 2-fold axes, independent of the cell choice) and the resulting (pseudo-)merohedral twin laws, tested with the H test, with an estimated twin fraction and an N(H) plot.
    - Non-merohedral twins: lattice 2-folds with 1–6° obliquity, tested on the overlapping reflections only.
    - Inversion (racemic) twinning from the Bijvoet differences, compared with the anomalous signal expected from the composition — a model-free, sign-less analogue of the Flack parameter.
+   - Absolute structure from a final CIF (refined model in `_shelx_res_file`, unmerged data in `_shelx_hkl_file`): Parsons quotients, Hooft y (with P2/P3) and a classical Flack x with the model held fixed, next to the value SHELXL wrote into the CIF. Supports LATT/SYMM, short and long SFAC, DISP, free variables, riding H, anisotropic U, EXTI, HKLF 4 matrices, OMIT/SHEL and inversion twins; not other twin laws, HKLF 5 or SWAT.
    - Merohedral and inversion twin laws can be written to the `.ins` as `TWIN`/`BASF` (opt-in).
 4. **Absences** — Lattice centring, screw axes and glide planes (including *d*-glides and diagonal planes), with zone plots and axial strips. Conditions that no space group of the Laue class can have are flagged as pseudo-symmetry. A table of **pseudo-translations** (reflection classes that are weak but present) warns of pseudo-centring and sub-cells.
 5. **E² Statistics** — Wilson plot, ⟨|E²−1|⟩ overall and per resolution shell, N(z) test. Needs a composition.
 6. **Space Group** — Candidates ranked against the observed absences, with an explanation of why close runners-up lose, a warning when the top candidates cannot be separated, and a space-group diagram (triclinic, monoclinic, orthorhombic) in the style of International Tables. A centrosymmetric/acentric tie is resolved by E² — or by the space group a loaded CIF reports.
 7. **SHELX .ins and .hkl** — A ready-to-use `.ins` for the selected candidate. If that candidate needs another setting than the measured one, the cell is transformed and the matrix written on the `HKLF` line; the `.hkl` itself stays untouched. Reflections from a CIF can be saved as a SHELX `.hkl`.
+8. **Report** — Everything the other tabs found in one document, with a live preview. It lists the input files (size, date, SHA-256), the result with the source of every decision (automatic, by hand, from a file, assumed or estimated), a list of points to check (twins, ties, unresolved candidates, pseudo-translations, an E² verdict that contradicts the selected group, low completeness, strong absorption, an assumed wavelength or estimated Z …), and the details of every step with the plots. Saved as a self-contained `.html` (prints cleanly to PDF from the browser; plots enlarge on click, collapsed parts open for printing) or as a plain-ASCII text listing (`…_report.txt`) in the spirit of XPREP's .prp file. A free-text field for sample, operator and remarks goes into the header.
 
 ## Methods
 
@@ -26,8 +28,8 @@ Runs entirely client-side: open `index.html` in a browser. No server, no build s
 - **Pseudo-symmetry vs. absences:** reflections are only treated as forbidden if a space group of the current Laue class can actually forbid them.
 - **Twin fraction:** α = ½ − ⟨H⟩ (Yeates 1988), from twin-related pairs selected by their summed intensity. Pseudo-symmetry raises it, noise lowers it — a start value for BASF, not a result.
 - **Inversion twin:** σ is rescaled from repeated measurements first; expected signal ⟨ΔI²⟩/⟨I²⟩ = 4 Σf″² / Σf₀²(s).
-- **Pseudo-translations:** mean and median intensity of each candidate weak class relative to the rest, ignoring reflections with a zero index. A strong pseudo-translation is flagged on the E² tab (it makes data look more centrosymmetric) and on the Twinning tab (it raises the twin fraction).
-- **CC½** by the σ–τ method (Assmann, Brehm & Diederichs 2016).
+- **Pseudo-translations:** mean and median intensity of each candidate weak class relative to the rest, ignoring reflections with a zero index. A strong pseudo-translation is flagged on the E² tab (it makes data look more centrosymmetric) and on tab 3 (it raises the twin fraction).
+- **CC½** by the σ–τ method (Assmann, Brehm & Diederichs 2016). **R<sub>σ</sub>** = Σσ(⟨I⟩) / Σ⟨I⟩ over the merged reflections.
 - **Notation:** space-group and point-group symbols on screen follow International Tables (italic letters, upright digits, subscript screw components, overbars). Files keep the plain ASCII symbol.
 
 ## Limitations
@@ -75,5 +77,6 @@ static/js/
   plot-theme.js, plot-zoom.js, view-modal.js
                               plots and diagrams
   sg-format.js                symbol notation
+  report-writer.js            report tab: HTML report and text listing
   tabs.js, app.js             user interface
 ```

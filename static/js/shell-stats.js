@@ -28,6 +28,7 @@
 function accumulateShell(chunk, sLo, sHi, possible, nAllowed = null) {
   let nTotal = 0, sumISig = 0, nISig = 0, nGt2 = 0;
   let numInt = 0, numMeas = 0, numPim = 0, den = 0;
+  let sumMeanI = 0, sumMeanSig = 0; // R_sigma = sum sigma(<I>) / sum <I> over the merged reflections
   const ccLists = []; // intensities of each reflection measured at least twice, for CC½
   for (const { members } of chunk) {
     const n = members.length;
@@ -35,6 +36,7 @@ function accumulateShell(chunk, sLo, sHi, possible, nAllowed = null) {
     const sum = members.reduce((a, r) => a + r.f2, 0);
     const mean = sum / n;
     const sig = Math.sqrt(members.reduce((a, r) => a + r.sigma * r.sigma, 0)) / n;
+    sumMeanI += mean; sumMeanSig += sig;
     if (sig > 0) {
       const x = mean / sig;
       sumISig += x; nISig++;
@@ -61,6 +63,7 @@ function accumulateShell(chunk, sLo, sHi, possible, nAllowed = null) {
     rInt: den > 0 ? numInt / den : null,
     rMeas: den > 0 ? numMeas / den : null,
     rPim: den > 0 ? numPim / den : null,
+    rSigma: sumMeanI > 0 ? sumMeanSig / sumMeanI : null,
     cc12: ccLists.length >= 10 ? cc12SigmaTau(ccLists) : null,
     nCC: ccLists.length,
   };
@@ -190,7 +193,7 @@ function renderShellStatistics(container, stats, info) {
     <tr${cls ? ` class="${cls}"` : ''}>
       <td>${label}</td><td>${sh.nUnique}</td>${compCell(sh)}<td>${sh.redundancy === null ? '—' : sh.redundancy.toFixed(2)}</td>
       <td>${num(sh.meanISigma)}</td><td>${pct(sh.fractionGt2)}</td>${ccCell(sh)}
-      <td>${pct(sh.rInt)}</td><td>${pct(sh.rMeas)}</td><td>${pct(sh.rPim)}</td>
+      <td>${pct(sh.rInt)}</td><td>${pct(sh.rMeas)}</td><td>${pct(sh.rPim)}</td><td>${pct(sh.rSigma)}</td>
     </tr>`;
   const dLabel = sh => `${sh.dMax === null ? '∞' : sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å`;
   const rows = stats.shells.map((sh, i) =>
@@ -219,7 +222,7 @@ function renderShellStatistics(container, stats, info) {
       Where the mean intensity approaches zero the R values grow without limit — use ⟨I/σ⟩ there.</small></p>
     <table class="shellTable">
       <tr><th>d range</th><th>Unique</th><th>Complete</th><th>Redundancy</th><th>⟨I/σ⟩</th><th>I &gt; 2σ</th><th>CC<sub>½</sub></th>
-          <th>R<sub>int</sub></th><th>R<sub>meas</sub></th><th>R<sub>pim</sub></th></tr>
+          <th>R<sub>int</sub></th><th>R<sub>meas</sub></th><th>R<sub>pim</sub></th><th>R<sub>σ</sub></th></tr>
       ${rows}${total}
     </table>
     ${redNote}${cutNote}
@@ -236,6 +239,7 @@ function renderShellStatistics(container, stats, info) {
         <li><strong>R<sub>int</sub></strong> — spread of equivalent measurements around their mean, Σ|I − ⟨I⟩| / ΣI. It grows with redundancy even when the data get better.</li>
         <li><strong>R<sub>meas</sub></strong> — R<sub>int</sub> corrected for redundancy (factor √(n/(n−1))): the quality of a single measurement, comparable between data sets.</li>
         <li><strong>R<sub>pim</sub></strong> — R<sub>int</sub> corrected with √(1/(n−1)): the precision of the merged (averaged) intensities that go into refinement; always smaller than R<sub>meas</sub>.</li>
+        <li><strong>R<sub>σ</sub></strong> — Σσ(⟨I⟩) / Σ⟨I⟩ over the merged reflections: the noise level of the data from the σ values alone (SHELXL's R(sigma)). Defined for merged data as well.</li>
       </ul>
       <p><small>R values are only defined for reflections measured at least twice, and they diverge where the mean intensity approaches zero — rely on ⟨I/σ⟩ there.</small></p>
     </details>`;
@@ -250,10 +254,8 @@ function renderShellStatistics(container, stats, info) {
 const SHELL_CURVE_COLORS = { complete: '#2a7bd4', gt2: '#2a9d5c', cc12: '#d9822b', rMeas: '#c0392b', isig: '#2a7bd4' };
 let _lastShellCurves = null;
 
-function renderShellCurves(container, stats) {
-  _lastShellCurves = [container, stats];
-  const a = container.querySelector('#shellCurvesA'), b = container.querySelector('#shellCurvesB');
-  if (!a || !b || !stats.shells || stats.shells.length < 2) return;
+// The two curve plots (also drawn by the report, report-writer.js).
+function shellCurveSpecs(stats) {
   const clip = x => (x === null ? null : Math.min(100, x * 100));
   const specA = {
     caption: '<strong>Shell statistics (percent)</strong>',
@@ -272,6 +274,14 @@ function renderShellCurves(container, stats) {
     refLine: { y: 2, label: '⟨I/σ⟩ = 2' },
     series: [{ label: '⟨I/σ⟩', color: SHELL_CURVE_COLORS.isig, vals: sh => (sh.meanISigma === null ? null : Math.max(0.5, sh.meanISigma)) }],
   };
+  return [specA, specB];
+}
+
+function renderShellCurves(container, stats) {
+  _lastShellCurves = [container, stats];
+  const a = container.querySelector('#shellCurvesA'), b = container.querySelector('#shellCurvesB');
+  if (!a || !b || !stats.shells || stats.shells.length < 2) return;
+  const [specA, specB] = shellCurveSpecs(stats);
   for (const [el, spec] of [[a, specA], [b, specB]]) {
     const canvas = document.createElement('canvas');
     el.innerHTML = ''; el.appendChild(canvas);
