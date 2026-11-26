@@ -71,7 +71,7 @@ const rptPct = (x, d = 1) => (x === null || x === undefined || !Number.isFinite(
 function rptHtmlToText(html) {
   if (html === null || html === undefined) return '';
   let s = String(html)
-    .replace(/<span class="sgBar">(\d)<\/span>/g, '-$1')
+    .replace(/<span class="sgd?Bar">(\d)<\/span>/g, '-$1')
     .replace(/<span class="tag tag-[a-z]+"[^>]*>([^<]*)<\/span>/g, '[$1]')
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<\/(p|li|tr|div|h\d)>/gi, ' ');
@@ -88,12 +88,13 @@ const _RPT_ASCII = {
   '≈': '~', '≤': '<=', '≥': '>=', '≠': '!=', '±': '+/-', '×': 'x', '·': '.', '−': '-', '–': '-', '—': '-',
   '⟨': '<', '⟩': '>', '→': '->', '←': '<-', '↓': 'v', '°': ' deg', 'Å': 'A', '′': "'", '″': "''",
   '²': '^2', '³': '^3', '¹': '^1', '⁻': '^-', '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4',
-  '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '∞': 'inf', '⚠': '!', '✓': '*', '✔': '*', '▶': '*', '✕': 'x',
+  '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '∥': '||', '⊥': 'perp', '∞': 'inf', '⚠': '!', '✓': '*', '✔': '*', '▶': '*', '✕': 'x',
   'ℹ': 'i', '‘': "'", '’': "'", '“': '"', '”': '"', '…': '...', '∗': '*', 'ⓘ': '(i)', '●': '*', '◎': 'o', '√': 'sqrt',
 };
 function rptAscii(text) {
   return String(text ?? '')
     .replace(/(\d)̅/g, '-$1') // "4̅" (formatSGText) → "-4"
+    .replace(/([a-z])\u0304/g, '-$1') // x̄ (diagram coordinates) → -x
     .replace(/⁻([¹²³])/g, (m, d) => '^-' + { '¹': '1', '²': '2', '³': '3' }[d])
     .replace(/[^\x00-\x7f]/g, ch => (_RPT_ASCII[ch] !== undefined ? _RPT_ASCII[ch] : ch.normalize('NFD').replace(/[^\x00-\x7f]/g, '') || '?'));
 }
@@ -520,6 +521,17 @@ function reportCollect(opts) {
     if (S.sg.unresolved && S.sg.unresolved.length) sgBlocks.push({ t: 'p', level: 'warn', html: `Not clearly separated from the top row: ${S.sg.unresolved.map(r => `${formatSG(r.entry.hm)} (${(r.score * 100).toFixed(1)} %)`).join(', ')}.` });
     if (S.sg.runnerUps && S.sg.runnerUps.length) sgBlocks.push({ t: 'list', caption: 'Why close runners-up score lower', items: S.sg.runnerUps.map(x => `<strong>${formatSG(x.r.entry.hm)}</strong> (${(x.r.score * 100).toFixed(1)} %): ${x.bad.join('; ')}`) });
     if (zp && zp.note) sgBlocks.push({ t: 'p', level: 'warn', html: rptEsc(zp.note) });
+    // the diagram exactly as tab 6 shows it (only when it is drawn there)
+    const sgdBox = document.getElementById('sgDiagramBox');
+    if (opts.sgd && sgdBox && sgdBox.querySelector('.sgdBox')) {
+      // general position for the text listing: [coordinates, operation] per line
+      const list = [...sgdBox.querySelectorAll('.sgdList li')].map(li => {
+        const xyz = li.querySelector('.sgdXYZ'), op = li.querySelector('.sgdOpSym');
+        return xyz ? [rptT(xyz.innerHTML), op ? rptT(op.innerHTML) : ''] : [rptT(li.innerHTML), null];
+      });
+      const de = reportState.ins && reportState.ins.entry ? reportState.ins.entry : selEntry;
+      sgBlocks.push({ t: 'sgd', html: sgdBox.innerHTML, title: de ? `${de.hm.replace(/\s+/g, ' ').trim()} (No. ${de.number}${de.qualifier ? ', setting ' + de.qualifier : ''})` : '', list });
+    }
   } else sgBlocks.push({ t: 'p', html: 'No candidates (needs reflections and the cell).' });
   sections.push({ id: 'sec-sg', title: 'Space group', blocks: sgBlocks });
 
@@ -610,7 +622,7 @@ p.l-ok { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
 ul.plain { margin: 4px 0; padding-left: 20px; } ul.plain li { margin: 2px 0; }
 .plots { display: flex; flex-wrap: wrap; gap: 14px 18px; margin: 10px 0; }
 .plots figure { margin: 0; break-inside: avoid; }
-.plots figure.small img { width: 210px; }
+.plots figure.small img { width: 200px; }
 .plots img { display: block; border: 1px solid var(--line); border-radius: 4px; cursor: zoom-in; max-width: 100%; height: auto; }
 .plots figcaption { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
 details { margin: 6px 0; }
@@ -619,6 +631,48 @@ pre { background: var(--soft); border: 1px solid var(--line); border-radius: 6px
 .sgSym { white-space: nowrap; font-style: normal; } .sgSym i { font-style: italic; }
 .sgSym sub { font-size: .72em; vertical-align: -.25em; line-height: 0; } .sgBar { text-decoration: overline; }
 footer { margin-top: 36px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; }
+/* space-group diagram (copied from the app, light colours) */
+.sgdBox { margin: 10px 0 4px; break-inside: avoid; }
+.sgdTitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; margin-bottom: 4px; }
+.sgdShort { font-size: 17px; font-weight: 650; font-style: italic; }
+.sgdFull, .sgdPg { font-style: italic; color: var(--muted); }
+.sgdNo, .sgdSetting { color: var(--muted); } .sgdSetting { font-size: 12px; }
+.sgdBody { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 22px; }
+svg.sgDiagram { width: 100%; max-width: 480px; height: auto; display: block; font-family: inherit; }
+.sgDiagram .sgdCell { stroke: var(--muted); stroke-width: 1; }
+.sgDiagram .sgdGrid { stroke: var(--muted); stroke-width: 0.6; opacity: 0.55; }
+.sgDiagram .sgdPlane { stroke: var(--ink); stroke-width: 1.6; fill: none; }
+.sgDiagram .sgdPlane.mirror, .sgDiagram .sgdCorner.mirror { stroke-width: 3; }
+.sgDiagram .sgdLens, .sgDiagram .sgdArrowHead { fill: var(--ink); stroke: var(--ink); stroke-width: 0.6; }
+.sgDiagram .sgdHook { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
+.sgDiagram .sgdAxisArrow, .sgDiagram .sgdCornerArrow { stroke: var(--ink); stroke-width: 1.4; }
+.sgDiagram .sgdCorner { fill: none; stroke: var(--ink); stroke-width: 1.6; }
+.sgDiagram .sgdInv { fill: #fff; stroke: var(--ink); stroke-width: 1.2; }
+.sgDiagram .sgdSmall { fill: var(--ink); font-size: 12.5px; }
+.sgDiagram .sgdPos { fill: none; stroke: #d0345a; stroke-width: 1.5; }
+.sgDiagram .sgdPosSplit { stroke: #d0345a; stroke-width: 1.1; }
+.sgDiagram .sgdCommaDot { fill: #d0345a; }
+.sgDiagram .sgdCommaTail { fill: none; stroke: #d0345a; stroke-width: 1.6; stroke-linecap: round; }
+.sgDiagram .sgdPosLabel { fill: #d0345a; font-size: 13px; font-weight: 650; }
+.sgDiagram .sgdAxisName, .sgDiagram .sgdAngleName { fill: var(--ink); font-size: 17px; font-style: italic; }
+.sgDiagram .sgdAxisLabelArrow { stroke: var(--ink); stroke-width: 1; }
+.sgDiagram .sgdAngle { fill: none; stroke: var(--ink); stroke-width: 1; }
+.sgDiagram .sgdHit { fill: transparent; stroke: none; }
+.sgDiagram .sgdHitLine { stroke: transparent; stroke-width: 10; }
+.sgDiagram .sgdEl, .sgDiagram .sgdPosGroup { cursor: help; }
+.sgDiagram .sgdPosGroup:hover .sgdPos { stroke-width: 2.6; }
+.sgDiagram .sgdEl:hover .sgdPlane, .sgDiagram .sgdEl:hover .sgdAxisArrow, .sgDiagram .sgdEl:hover .sgdCorner,
+.sgDiagram .sgdEl:hover .sgdHook, .sgDiagram .sgdEl:hover .sgdInv, .sgDiagram .sgdEl:hover .sgdCornerArrow { stroke: var(--accent); }
+.sgDiagram .sgdEl:hover .sgdLens, .sgDiagram .sgdEl:hover .sgdArrowHead { fill: var(--accent); stroke: var(--accent); }
+.sgdListBox { min-width: 220px; font-size: 13px; }
+.sgdListHead { font-weight: 650; } .sgdListHead span { font-weight: 400; color: var(--muted); font-size: 12px; }
+.sgdListSub { font-size: 11.5px; color: var(--muted); max-width: 270px; margin: 2px 0 6px; line-height: 1.35; }
+.sgdList { margin: 0; padding-left: 24px; line-height: 1.75; font-variant-numeric: tabular-nums; }
+.sgdList li::marker { color: var(--muted); }
+.sgdXYZ { font-style: italic; display: inline-block; min-width: 150px; }
+.sgdOpSym { font-size: 11.5px; color: var(--muted); margin-left: 8px; font-style: normal; }
+.sgdList .sgdCentring { list-style: none; margin-left: -24px; font-style: normal; }
+.sgdNote { margin-top: 4px; color: var(--muted); }
 #lightbox { position: fixed; inset: 0; background: rgba(20,22,26,.78); display: none; align-items: center; justify-content: center; z-index: 10; cursor: zoom-out; padding: 24px; }
 #lightbox.on { display: flex; }
 #lightbox figure { margin: 0; background: #fff; padding: 12px; border-radius: 8px; max-width: 96vw; max-height: 94vh; overflow: auto; }
@@ -638,6 +692,7 @@ footer { margin-top: 36px; padding-top: 8px; border-top: 1px solid var(--line); 
   .plots { gap: 8px 4%; }
   .plots figure { width: 48%; } .plots figure img { width: 100% !important; }
   .plots figure.small { width: 23%; }
+  svg.sgDiagram { max-width: 105mm; }
   table { font-size: 9pt; } th, td { padding: 2.5px 6px; }
   .plots img { cursor: default; }
   a { color: inherit; text-decoration: none; }
@@ -691,7 +746,8 @@ function renderReportBlockInner(b) {
     }
     case 'findings': return `<ul class="findings">${b.items.map(f => `<li class="l-${f.level}"><span class="lvl">${{ bad: 'Problem', warn: 'Check', info: 'Note' }[f.level]}</span>${f.html}${f.ref ? `<a href="#${f.ref}">→ details</a>` : ''}</li>`).join('')}</ul>`;
     case 'list': return `${b.caption ? `<div class="caption">${b.caption}</div>` : ''}<ul class="plain${b.small ? ' small' : ''}">${b.items.map(i => `<li>${i}</li>`).join('')}</ul>`;
-    case 'plots': return b.items.length ? `<div class="plots">${b.items.map(p => `<figure${b.small ? ' class="small"' : ''}><img src="${p.src}" alt="${rptEsc(rptHtmlToText(p.title))}" style="width:${b.small ? 210 : p.width}px" title="Click to enlarge"><figcaption>${p.title}</figcaption></figure>`).join('')}</div>` : '';
+    case 'plots': return b.items.length ? `<div class="plots">${b.items.map(p => `<figure${b.small ? ' class="small"' : ''}><img src="${p.src}" alt="${rptEsc(rptHtmlToText(p.title))}" style="width:${b.small ? 200 : p.width}px" title="Click to enlarge"><figcaption>${p.title}</figcaption></figure>`).join('')}</div>` : '';
+    case 'sgd': return `<div class="caption">Space-group diagram (selected candidate)</div>${b.html}`;
     case 'pre': return `<details open><summary>${rptEsc(b.summary || 'show')}</summary><pre>${rptEsc(b.text)}</pre></details>`;
     default: return '';
   }
@@ -781,6 +837,12 @@ function renderReportBlockText(b) {
     case 'findings': return b.items.map(f => prpWrap(rptT(f.html), '            ', `  ${{ bad: '[PROBLEM]', warn: '[CHECK]  ', info: '[NOTE]   ' }[f.level]} `)).join('\n');
     case 'list': return (b.caption ? `  ${rptT(b.caption)}:\n` : '') + b.items.map(i => prpWrap(rptT(i), '    ', '  - ')).join('\n');
     case 'plots': return '';
+    case 'sgd': {
+      const w = Math.max(...b.list.map(l => l[0].length));
+      return `  Space-group diagram: ${rptAscii(b.title)}\n  General position (multiplicity ${b.list.filter(l => l[1] !== null).length}):\n`
+        + b.list.map((l, i) => (l[1] === null ? `        ${l[0]}` : `  ${String(i + 1).padStart(4)}  ${l[0].padEnd(w)}   ${l[1]}`)).join('\n')
+        + '\n  (the diagram itself is in the HTML report)';
+    }
     case 'pre': return b.text.replace(/\s+$/, '').split('\n').map(l => '  ' + l).join('\n');
     default: return '';
   }
@@ -813,7 +875,7 @@ function renderReportText(model) {
 function reportOptions() {
   const cb = id => { const el = document.getElementById(id); return !!(el && el.checked); };
   const notesEl = document.getElementById('reportNotes');
-  return { plots: cb('reportOptPlots'), zonePlots: cb('reportOptZones'), shellTable: cb('reportOptShells'), ins: cb('reportOptIns'), notes: notesEl ? notesEl.value.trim() : '' };
+  return { plots: cb('reportOptPlots'), zonePlots: cb('reportOptZones'), shellTable: cb('reportOptShells'), ins: cb('reportOptIns'), sgd: cb('reportOptSgd'), notes: notesEl ? notesEl.value.trim() : '' };
 }
 
 let _reportTimer = null;
@@ -879,7 +941,7 @@ function reportDownload(text, filename, type) {
   if (typeof origSwitch === 'function') {
     window.switchTab = id => { origSwitch(id); if (id === 'tab-report') setTimeout(reportRefresh, 0); };
   }
-  ['reportOptPlots', 'reportOptZones', 'reportOptShells', 'reportOptIns'].forEach(id => {
+  ['reportOptPlots', 'reportOptZones', 'reportOptShells', 'reportOptIns', 'reportOptSgd'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', reportRefresh);
   });
