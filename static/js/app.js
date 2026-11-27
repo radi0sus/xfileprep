@@ -2244,13 +2244,13 @@
         renderE2TwinNote();
         const ref = WILSON_REFERENCE;
         const verdictColor = stats.verdict === 'centrosymmetric' ? '#080' : '#06c';
-        const nzColor = stats.nz.closest === 'centrosymmetric' ? '#080' : (stats.nz.closest === 'acentric' ? '#06c' : '#b60');
+        const nzColor = stats.nz.closest === 'centrosymmetric' ? '#080' : stats.nz.closest === 'acentric' ? '#06c' : stats.nz.closest === 'undecided' ? '#888' : '#b60';
         // Plain-language reading of the N(z) result next to the <|E²−1|> verdict.
         let nzNote = '';
         if (stats.nz.closest === 'acentric, twinned?') {
           nzNote = `<p style="color:#b60"><small>⚠ The distribution is closest to a <strong>twinned acentric</strong> crystal. A true centrosymmetric structure would be closer to the green curve —
             if the &lt;|E²−1|&gt; verdict above says "centrosymmetric", consider twinning (e.g. a pseudo-merohedral twin of an acentric structure) before trusting it.</small></p>`;
-        } else if ((stats.nz.closest === 'centrosymmetric') !== (stats.verdict === 'centrosymmetric')) {
+        } else if (stats.nz.closest !== 'undecided' && (stats.nz.closest === 'centrosymmetric') !== (stats.verdict === 'centrosymmetric')) {
           nzNote = `<p style="color:#b60"><small>⚠ N(z) and &lt;|E²−1|&gt; point in different directions — the data are not clean enough for either to be decisive (twinning, a dominant heavy atom or pseudosymmetry are the usual causes).</small></p>`;
         }
 
@@ -2301,16 +2301,26 @@
           const rows = es.shells.map(sh => `
             <tr${sh.few ? ' style="opacity:0.6;"' : ''}><td>${sh.dMax === null ? '∞' : sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å</td><td>${sh.n}</td><td>${sh.meanE2raw.toFixed(2)}</td>
             <td><strong>${sh.meanAbs.toFixed(3)}</strong></td>
-            <td style="color:${sh.few ? 'inherit' : col(sh.verdict)}">${sh.few ? 'few reflections' : sh.verdict}</td>
+            <td style="color:${sh.few ? 'inherit' : sh.decisive ? col(sh.verdict) : '#888'}">${sh.few ? 'few reflections' : sh.decisive ? sh.verdict : `${sh.verdict} <small>(within noise)</small>`}</td>
             <td>${(sh.fractionEgt3 * 100).toFixed(2)}%</td></tr>`).join('');
           const usedShells = es.shells.filter(sh => !sh.few);
-          const first = usedShells[0], last = usedShells[usedShells.length - 1];
+          const decShells = usedShells.filter(sh => sh.decisive);
+          const first = decShells[0] || usedShells[0], last = decShells[decShells.length - 1] || usedShells[usedShells.length - 1];
+          const range = sh => `${sh.dMax === null ? '∞' : sh.dMax.toFixed(2)} – ${sh.dMin.toFixed(2)} Å`;
+          const majority = decShells.filter(sh => sh.verdict === 'acentric').length >= decShells.length / 2 ? 'acentric' : 'centrosymmetric';
+          const nUnd = usedShells.length - decShells.length;
+          const undNote = nUnd ? ` ${nUnd} shell(s) lie within 1 su of the boundary (${es.mid.toFixed(3)}) and decide nothing.` : '';
           const fewNote = es.nFew ? ` ${es.nFew} shell(s) with fewer than ${E_SHELL_MIN} reflections are shown (hollow circles) but not used for this comparison.` : '';
-          const shellNote = es.consistent
-            ? `<p style="color:#080"><small>✓ All ${usedShells.length} resolution shells used point to the same class (${first.verdict}) — the verdict does not depend on the resolution range.${fewNote}</small></p>`
-            : `<p style="color:#b60"><small>⚠ The shells do not agree: ${first.verdict} at low resolution (${first.dMax === null ? '∞' : first.dMax.toFixed(2)} – ${first.dMin.toFixed(2)} Å), ${last.verdict} at high resolution
-               (${last.dMax.toFixed(2)} – ${last.dMin.toFixed(2)} Å). A heavy atom that dominates the low-resolution data, or pseudosymmetry, can do that — treat the overall verdict with caution.
-               If only the outermost shell differs, weak, noisy data are the more likely reason.${fewNote}</small></p>`;
+          const odd = es.oddOne;
+          const oddNote = odd ? ` Only one shell (${range(odd)}) is clearly ${odd.verdict}${odd === usedShells[0]
+              ? ' — the innermost shell, where Wilson statistics are least reliable (the atoms are not randomly distributed at low resolution)'
+              : odd === usedShells[usedShells.length - 1] ? ' — the outermost shell, where weak, noisy data are the likely reason' : ''}; one shell alone is not taken as disagreement.` : '';
+          const shellNote = !es.consistent
+            ? `<p style="color:#b60"><small>⚠ The shells do not agree: ${first.verdict} at low resolution (${range(first)}), ${last.verdict} at high resolution
+               (${range(last)}), each in more than one shell. A heavy atom that dominates the low-resolution data, or pseudosymmetry, can do that — treat the overall verdict with caution.${undNote}${fewNote}</small></p>`
+            : !decShells.length
+              ? `<p style="color:#888"><small>No resolution shell is clearly on either side of the boundary (${es.mid.toFixed(3)}).${fewNote}</small></p>`
+              : `<p style="color:#080"><small>✓ The resolution shells agree: ${decShells.length - (odd ? 1 : 0)} of ${usedShells.length} clearly ${majority}.${oddNote}${undNote}${fewNote}</small></p>`;
           eShellHtml = `
           <h2>E² statistics by resolution shell</h2>
           <details class="explain"><summary>How to read this</summary><p><small>The same ⟨|E²−1|⟩ as above, worked out separately for resolution shells
@@ -2353,7 +2363,8 @@
             <tr><th></th><th>centrosymmetric</th><th>acentric</th><th>acentric, perfect twin</th></tr>
             <tr><td>D</td><td>${stats.nz.dCentro.toFixed(3)}</td><td>${stats.nz.dAcentric.toFixed(3)}</td><td>${stats.nz.dTwin.toFixed(3)}</td></tr>
           </table>
-          <p style="color:${nzColor}"><strong>N(z) is closest to: ${stats.nz.closest}</strong> <small>(${stats.nz.n} reflections${stats.nz.negClipped ? `, ${stats.nz.negClipped} with negative intensity counted as z = 0` : ''})</small></p>
+          <p style="color:${nzColor}"><strong>${stats.nz.closest === 'undecided' ? 'N(z): undecided' : `N(z) is closest to: ${stats.nz.closest}`}</strong>${stats.nz.closest === 'undecided'
+            ? ` <small>— centrosymmetric and acentric fit about equally well (the D values differ by less than the noise level 1.36/√n = ${stats.nz.noise.toFixed(3)})</small>` : ''} <small>(${stats.nz.n} reflections${stats.nz.negClipped ? `, ${stats.nz.negClipped} with negative intensity counted as z = 0` : ''})</small></p>
           ${nzNote}
           <div id="nzPlotContainer"></div>
           ${eShellHtml}`;

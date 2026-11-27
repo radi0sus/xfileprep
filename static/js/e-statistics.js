@@ -95,9 +95,17 @@ function computeNZ(e2Values, negClipped) {
     while (idx < n && sorted[idx] <= z) idx++;
     curve.push({ z, n: idx / n });
   }
-  const best = Math.min(dCentro, dAcentric, dTwin);
-  const closest = best === dTwin ? 'acentric, twinned?' : (best === dCentro ? 'centrosymmetric' : 'acentric');
-  return { n, negClipped, dCentro, dAcentric, dTwin, curve, closest };
+  // Two D values closer than the KS noise level (1.36/√n, 95 %) do not
+  // distinguish the references: then N(z) is 'undecided' (a near tie between
+  // plain and twinned acentric still means acentric).
+  const noise = 1.36 / Math.sqrt(n);
+  const ranked = [['centrosymmetric', dCentro], ['acentric', dAcentric], ['acentric, twinned?', dTwin]].sort((x, y) => x[1] - y[1]);
+  let closest = ranked[0][0];
+  if (ranked[1][1] - ranked[0][1] < noise) {
+    const pair = new Set([ranked[0][0], ranked[1][0]]);
+    closest = pair.has('centrosymmetric') ? 'undecided' : 'acentric';
+  }
+  return { n, negClipped, dCentro, dAcentric, dTwin, curve, closest, noise };
 }
 const NZ_ZMAX = 4;
 
@@ -219,14 +227,19 @@ function computeEShells(pairs, shellInfo = null) {
     if (m === 0) return;
     const meanE2raw = chunk.reduce((a, p) => a + p.e2, 0) / m;
     if (!(meanE2raw > 0)) return;
-    let sumAbs = 0, gt3 = 0, sumS2 = 0;
+    let sumAbs = 0, sumAbs2 = 0, gt3 = 0, sumS2 = 0;
     for (const p of chunk) {
       const e2 = p.e2 / meanE2raw;
       sumAbs += Math.abs(e2 - 1);
+      sumAbs2 += (e2 - 1) * (e2 - 1);
       if (Math.sqrt(e2) > 3) gt3++;
       sumS2 += p.s * p.s;
     }
     const meanAbs = sumAbs / m;
+    // standard error of ⟨|E²−1|⟩ in this shell (≈ 0.04 for 400 reflections, while
+    // the references are only 0.116 from the boundary); a shell is decisive when
+    // it lies more than 1 su from the boundary
+    const su = Math.sqrt(Math.max(0, sumAbs2 / m - meanAbs * meanAbs) / m);
     const lo = sLo.length ? sLo[i] : chunk[0].s;
     const hi = shellInfo && shellInfo.haveTheory ? shellInfo.bounds[i] : chunk[m - 1].s;
     shells.push({
@@ -235,12 +248,20 @@ function computeEShells(pairs, shellInfo = null) {
       dMax: lo > 0 ? 1 / (2 * lo) : null, dMin: 1 / (2 * hi),
       few: m < E_SHELL_MIN,
       verdict: meanAbs < mid ? 'acentric' : 'centrosymmetric',
+      su, decisive: Math.abs(meanAbs - mid) > su,
     });
   });
   const used = shells.filter(sh => !sh.few);
   if (used.length < 2) return { tooFew: true, n };
-  const verdicts = new Set(used.map(sh => sh.verdict));
-  return { shells, consistent: verdicts.size === 1, nFew: shells.length - used.length, n };
+  // The shells disagree only when at least two decisive shells are on the
+  // minority side; a single one (often the innermost, where Wilson statistics
+  // are least reliable) is reported as oddOne instead.
+  const dec = used.filter(sh => sh.decisive);
+  const nCentro = dec.filter(sh => sh.verdict === 'centrosymmetric').length, nAcen = dec.length - nCentro;
+  const minority = nCentro < nAcen ? 'centrosymmetric' : 'acentric';
+  const nMinority = Math.min(nCentro, nAcen);
+  const oddOne = nMinority === 1 ? dec.find(sh => sh.verdict === minority) : null;
+  return { shells, consistent: nMinority < 2, oddOne, nDecisive: dec.length, mid, nFew: shells.length - used.length, n };
 }
 
 // Plot: shell-wise <|E²−1|> against (sin θ/λ)², with the two reference values.

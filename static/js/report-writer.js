@@ -486,7 +486,7 @@ function reportCollect(opts) {
     ] });
     eBlocks.push({ t: 'kv', rows: [
       ['⟨|E²−1|⟩ verdict', `<strong>${st.verdict}</strong> <small>(margin ${(st.margin * 100).toFixed(0)} %)</small>`],
-      ['N(z) closest to', `<strong>${rptEsc(st.nz.closest)}</strong> <small>(D: centro ${st.nz.dCentro.toFixed(3)} · acentric ${st.nz.dAcentric.toFixed(3)} · twinned ${st.nz.dTwin.toFixed(3)})</small>`],
+      [st.nz.closest === 'undecided' ? 'N(z)' : 'N(z) closest to', `<strong>${rptEsc(st.nz.closest)}</strong> <small>(D: centro ${st.nz.dCentro.toFixed(3)} · acentric ${st.nz.dAcentric.toFixed(3)} · twinned ${st.nz.dTwin.toFixed(3)})</small>`],
       ['Wilson fit', `B = ${st.B.toFixed(2)} Å² · k = ${st.k.toFixed(3)}`],
     ] });
     if (estat.autoSelect) eBlocks.push({ t: 'p', small: true, html: estat.autoSelect.replace(/<\/?p[^>]*>/g, '') });
