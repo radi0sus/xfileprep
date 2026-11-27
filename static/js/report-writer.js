@@ -87,7 +87,7 @@ const _RPT_ASCII = {
   'σ': 'sig', 'χ': 'chi', 'ρ': 'rho', 'π': 'pi', 'Δ': 'Delta', 'ε': 'eps', 'τ': 'tau',
   '≈': '~', '≤': '<=', '≥': '>=', '≠': '!=', '±': '+/-', '×': 'x', '·': '.', '−': '-', '–': '-', '—': '-',
   '⟨': '<', '⟩': '>', '→': '->', '←': '<-', '↓': 'v', '°': ' deg', 'Å': 'A', '′': "'", '″': "''",
-  '²': '^2', '³': '^3', '¹': '^1', '⁻': '^-', '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4',
+  '²': '^2', '³': '^3', '¹': '^1', '⁻': '^-', '⁺': '^+', '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4',
   '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '∥': '||', '⊥': 'perp', '∞': 'inf', '⚠': '!', '✓': '*', '✔': '*', '▶': '*', '✕': 'x',
   'ℹ': 'i', '‘': "'", '’': "'", '“': '"', '”': '"', '…': '...', '∗': '*', 'ⓘ': '(i)', '●': '*', '◎': 'o', '√': 'sqrt',
 };
@@ -98,7 +98,9 @@ function rptAscii(text) {
     .replace(/⁻([¹²³])/g, (m, d) => '^-' + { '¹': '1', '²': '2', '³': '3' }[d])
     .replace(/[^\x00-\x7f]/g, ch => (_RPT_ASCII[ch] !== undefined ? _RPT_ASCII[ch] : ch.normalize('NFD').replace(/[^\x00-\x7f]/g, '') || '?'));
 }
-const rptT = html => rptAscii(rptHtmlToText(html)); // HTML → ASCII text
+// HTML → ASCII text; a bar drawn by CSS (<span class="sgdBar">1</span> for 1̄,
+// also 4̄ in the general-position list) becomes "-1" / "-4" like "1̅" does
+const rptT = html => rptAscii(rptHtmlToText(String(html ?? '').replace(/<span class="sgd?Bar">(\d)<\/span>/g, '$1\u0305')));
 
 // value(su) from a value and its esd, as entered when there is no esd
 function rptWithSu(value, su) {
@@ -631,7 +633,7 @@ details { margin: 6px 0; }
 details > summary { cursor: pointer; font-size: 12.5px; color: var(--accent); }
 pre { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; white-space: pre; overflow-x: auto; line-height: 1.35; }
 .sgSym { white-space: nowrap; font-style: normal; } .sgSym i { font-style: italic; }
-.sgSym sub { font-size: .72em; vertical-align: -.25em; line-height: 0; } .sgBar { text-decoration: overline; }
+.sgSym sub { font-size: .72em; vertical-align: -.25em; line-height: 0; } .sgBar, .sgdBar { text-decoration: overline; }
 footer { margin-top: 36px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; }
 /* space-group diagram (copied from the app, light colours) */
 .sgdBox { margin: 10px 0 4px; break-inside: avoid; }

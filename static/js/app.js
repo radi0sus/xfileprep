@@ -382,7 +382,11 @@
       const sel = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
       // an inversion twin only exists in an acentric space group
       // with a refined model, its sign-carrying result replaces the model-free estimate (absFindings)
-      const modelDecides = lastAbsStructure && lastAbsStructure.applicable;
+      // While the model is still being computed it will decide too: no model-free
+      // flag in the meantime (7135973, P212121, Eu: the composition estimate gave
+      // x ≈ 0.17 for 2 s, then the model x = 0.00 — the banner blinked).
+      const modelPending = !lastAbsStructure && lastModelCif && lastModelCif.reflections === lastReflections;
+      const modelDecides = modelPending || (lastAbsStructure && lastAbsStructure.applicable);
       if (!modelDecides && t && !lastAnomalousCheck.systematic && t.x >= 0.1 && t.expectedChi2 >= 1.5 && sel && !hallSymbolIsCentrosymmetric(sel.hall)) out.push({ kind: 'inversion', text: `inversion twin, x ≈ ${t.x.toFixed(2)}${t.x >= 0.35 ? ' (or centrosymmetric)' : ''}` });
       return out.length ? out : null;
     }
