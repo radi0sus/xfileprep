@@ -205,13 +205,13 @@ function reportCollect(opts) {
   if (!cell) add('bad', 'No complete unit cell — nothing could be analysed.', null);
   const tf = twinFindings() || [];
   const twinNotInIns = !!(S.ins && S.ins.notes && S.ins.notes.twin);
-  for (const f of tf) add('warn', f.kind === 'nonmero' ? (f.text.startsWith('twin of index 2') ? `${f.text} — refined with TWIN and HKLF 4 (no HKLF 5 file needed)${S.ins && S.ins.twin && S.ins.twin.matrix.flat().some(x => Math.abs(x - Math.round(x)) > 0.25) ? '; written to the .ins' : '; tick it on tab 3 to write TWIN/BASF to the .ins'}.` : `${f.text} — needs an HKLF 5 file (PLATON TwinRotMat, TWINABS); the .ins cannot model it.`)
-    : `${f.kind === 'inversion' ? 'Inversion twin' : 'Twinning'}: ${f.text}${twinNotInIns && S.ins.notes.twin.includes(f.text) ? ' — <em>not written to the .ins</em> (tick it on tab 3 to add TWIN/BASF)' : ''}`, 'sec-twin');
+  for (const f of tf) add('warn', f.kind === 'nonmero' ? (f.text.startsWith('twin of index 2') ? `${f.text} — refined with TWIN and HKLF 4 (no HKLF 5 file needed)${S.ins && S.ins.twin && S.ins.twin.matrix.flat().some(x => Math.abs(x - Math.round(x)) > 0.25) ? '; written to the .ins' : '; tick it on the Twins tab to write TWIN/BASF to the .ins'}.` : `${f.text} — needs an HKLF 5 file (PLATON TwinRotMat, TWINABS); the .ins cannot model it.`)
+    : `${f.kind === 'inversion' ? 'Inversion twin' : 'Twinning'}: ${f.text}${twinNotInIns && S.ins.notes.twin.includes(f.text) ? ' — <em>not written to the .ins</em> (tick it on the Twins tab to add TWIN/BASF)' : ''}`, 'sec-twin');
   for (const f of absFindings()) add(f.text.includes('inverted') ? 'bad' : 'warn', `Absolute structure: ${f.text}`, 'sec-twin');
   for (const sec of S.twinSections || []) {
     if (sec.level === 'bad' && sec.id !== 'abs') add('bad', `${sec.short}: ${sec.verdict}`, 'sec-twin');
   }
-  if (S.ins && S.ins.twin) add('info', `The .ins contains <code>TWIN ${S.ins.twin.matrix.flat().join(' ')}${S.ins.twin.n !== 2 ? ' ' + S.ins.twin.n : ''}</code> with <code>BASF ${S.ins.twin.basf.map(b => b.toFixed(2)).join(' ')}</code> (ticked on tab 3).`, 'sec-ins');
+  if (S.ins && S.ins.twin) add('info', `The .ins contains <code>TWIN ${S.ins.twin.matrix.flat().join(' ')}${S.ins.twin.n !== 2 ? ' ' + S.ins.twin.n : ''}</code> with <code>BASF ${S.ins.twin.basf.map(b => b.toFixed(2)).join(' ')}</code> (ticked on the Twins tab).`, 'sec-ins');
   if (S.ins && S.ins.tiedOpposite && selectionSource === 'default') {
     add('bad', `${formatSG(selEntry.hm)} is tied with ${formatSG(S.ins.tiedOpposite.entry.hm)} (${hallSymbolIsCentrosymmetric(S.ins.tiedOpposite.entry.hall) ? 'centrosymmetric' : 'acentric'}) — absences cannot decide; no E² statistics were available to break the tie.`, 'sec-sg');
   }
@@ -650,6 +650,9 @@ svg.sgDiagram { width: 100%; max-width: 480px; height: auto; display: block; fon
 .sgDiagram .sgdAxisArrow, .sgDiagram .sgdCornerArrow { stroke: var(--ink); stroke-width: 1.4; }
 .sgDiagram .sgdCorner { fill: none; stroke: var(--ink); stroke-width: 1.6; }
 .sgDiagram .sgdInv { fill: #fff; stroke: var(--ink); stroke-width: 1.2; }
+.sgDiagram .sgdQuad { fill: var(--ink); stroke: var(--ink); stroke-width: 0.6; stroke-linejoin: round; }
+.sgDiagram .sgdQuadOpen { fill: #fff; stroke: var(--ink); stroke-width: 1.4; stroke-linejoin: round; }
+.sgDiagram .sgdTail { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: butt; }
 .sgDiagram .sgdSmall { fill: var(--ink); font-size: 12.5px; }
 .sgDiagram .sgdPos { fill: none; stroke: #d0345a; stroke-width: 1.5; }
 .sgDiagram .sgdPosSplit { stroke: #d0345a; stroke-width: 1.1; }
@@ -664,8 +667,8 @@ svg.sgDiagram { width: 100%; max-width: 480px; height: auto; display: block; fon
 .sgDiagram .sgdEl, .sgDiagram .sgdPosGroup { cursor: help; }
 .sgDiagram .sgdPosGroup:hover .sgdPos { stroke-width: 2.6; }
 .sgDiagram .sgdEl:hover .sgdPlane, .sgDiagram .sgdEl:hover .sgdAxisArrow, .sgDiagram .sgdEl:hover .sgdCorner,
-.sgDiagram .sgdEl:hover .sgdHook, .sgDiagram .sgdEl:hover .sgdInv, .sgDiagram .sgdEl:hover .sgdCornerArrow { stroke: var(--accent); }
-.sgDiagram .sgdEl:hover .sgdLens, .sgDiagram .sgdEl:hover .sgdArrowHead { fill: var(--accent); stroke: var(--accent); }
+.sgDiagram .sgdEl:hover .sgdHook, .sgDiagram .sgdEl:hover .sgdInv, .sgDiagram .sgdEl:hover .sgdCornerArrow, .sgDiagram .sgdEl:hover .sgdTail, .sgDiagram .sgdEl:hover .sgdQuadOpen { stroke: var(--accent); }
+.sgDiagram .sgdEl:hover .sgdLens, .sgDiagram .sgdEl:hover .sgdArrowHead, .sgDiagram .sgdEl:hover .sgdQuad { fill: var(--accent); stroke: var(--accent); }
 .sgdListBox { min-width: 220px; font-size: 13px; }
 .sgdListHead { font-weight: 650; } .sgdListHead span { font-weight: 400; color: var(--muted); font-size: 12px; }
 .sgdListSub { font-size: 11.5px; color: var(--muted); max-width: 270px; margin: 2px 0 6px; line-height: 1.35; }

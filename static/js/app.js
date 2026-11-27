@@ -355,12 +355,12 @@
       if (!el) return;
       // cross-check from tab 3: a clear Bijvoet signal proves an acentric structure
       const bijvoet = lastAnomalousCheck && lastAnomalousCheck.enough && lastAnomalousCheck.acentricEvidence === 'strong' && lastEStatVerdict === 'centrosymmetric'
-        ? `<p style="color:#b60"><strong>⚠ Bijvoet pairs say acentric</strong> (tab 3: χ² = ${lastAnomalousCheck.chi2.toFixed(1)}): Friedel's law is clearly broken, which no centrosymmetric
+        ? `<p style="color:#b60"><strong>⚠ Bijvoet pairs say acentric</strong> (Twins tab: χ² = ${lastAnomalousCheck.chi2.toFixed(1)}): Friedel's law is clearly broken, which no centrosymmetric
             structure can do — the "centrosymmetric" verdict below is overruled (twinning, a dominant heavy atom or pseudo-symmetry can make E² look centrosymmetric).</p>` : '';
       const laws = lastTwinCheck && lastTwinCheck.applicable ? lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')) : [];
       if (!laws.length) { el.innerHTML = bijvoet; return; }
       const best = laws.sort((a, b) => b.alpha - a.alpha)[0];
-      el.innerHTML = bijvoet + `<p style="color:#b60"><strong>⚠ Twinning found</strong> (tab 3: <code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}).
+      el.innerHTML = bijvoet + `<p style="color:#b60"><strong>⚠ Twinning found</strong> (Twins tab: <code>TWIN ${best.shelxMatrix.flat().join(' ')}</code>, α ≈ ${best.alpha.toFixed(2)}).
         Twinning averages the intensities of twin-related reflections and narrows their distribution: ⟨|E²−1|⟩ drops below the acentric value
         and N(z) moves towards the twinned-acentric curve. The centrosymmetric/acentric verdict below is therefore unreliable — an "acentric" can
         come from the twin alone, while a "centrosymmetric" despite the twin points to pseudo-symmetry (e.g. Z′ > 1, heavy atoms on special positions).</p>`;
@@ -414,12 +414,12 @@
       const btn = document.getElementById('twinTabBtn');
       if (btn) {
         btn.classList.toggle('twinAlert', f.length > 0);
-        btn.textContent = f.length ? '3. Twins & Abs. Structure ⚠' : '3. Twins & Abs. Structure';
+        btn.textContent = f.length ? 'Twins & Abs. Structure ⚠' : 'Twins & Abs. Structure';
       }
       const banner = document.getElementById('twinBanner');
       if (!banner) return;
       if (!f.length) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
-      banner.innerHTML = `<strong>⚠ ${f.every(x => x.kind === 'abs') ? 'Absolute structure' : 'Twinning found'}:</strong> ${f.map(x => x.text).join(' · ')} — <a id="twinBannerLink">see tab 3</a>.`;
+      banner.innerHTML = `<strong>⚠ ${f.every(x => x.kind === 'abs') ? 'Absolute structure' : 'Twinning found'}:</strong> ${f.map(x => x.text).join(' · ')} — <a id="twinBannerLink">see the Twins tab</a>.`;
       banner.style.display = 'block';
       const link = document.getElementById('twinBannerLink');
       if (link) link.addEventListener('click', () => window.switchTab && window.switchTab('tab-twin'));
@@ -773,7 +773,7 @@
           The ratio observed/expected ≈ |1 − 2x|. Like the Flack parameter, but without a model and therefore without sign: x and 1 − x look the same, and a 50:50
           racemic twin cannot be told apart from a centrosymmetric structure. As a control, the same χ² is computed for the other acentric halves of the Laue group
           (e.g. 2 instead of m): there the Bijvoet mates cancel, so only absorption/scaling errors remain. A clear excess over χ² = 1 <em>and</em> over the control means the structure is acentric, whatever the E² statistics
-          (tab 5) say — a useful cross-check when twinning or a heavy atom makes E² look centrosymmetric. Refine the Flack parameter (or BASF) to get the real value.
+          say — a useful cross-check when twinning or a heavy atom makes E² look centrosymmetric. Refine the Flack parameter (or BASF) to get the real value.
           <br><strong>Zone plot:</strong> one reciprocal-lattice layer like the Laue layer viewer, circle area ∝ |I(h) − I(−h)|/σ (full size at 8σ), filled where
           I(h) &gt; I(−h), open where I(h) &lt; I(−h), grey dots below the chosen threshold (3σ by default, so that the noise pairs of a centrosymmetric
           structure stay dots). Each pair appears at h and, with the opposite sign, at −h; it is drawn at all symmetry equivalents. As in the Laue viewer, indices present in the data are blue, positions filled in from an equivalent orange; the status line counts pairs, not positions. In centric layers (e.g. h0l in
@@ -1931,7 +1931,7 @@
            (see the Space Group tab); the data agree with it as well as with any of them.</p>`
         : tiedOpposite && selectionSource !== 'manual'
         ? (selectionSource === 'auto-e-stat'
-            ? `<p style="color:#080"><strong>✓ ${formatHM(top.hm)} was picked over the tied ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}) based on the E² statistics (tab 5)</strong> —
+            ? `<p style="color:#080"><strong>✓ ${formatHM(top.hm)} was picked over the tied ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}) based on the E² statistics</strong> —
                absences alone couldn't distinguish them (both ${(topScore * 100).toFixed(0)}%), but the intensity-distribution check can, and did.</p>`
             : `<p style="color:#b00"><strong>⚠ This is tied at ${(topScore * 100).toFixed(0)}% with ${formatHM(tiedOpposite.entry.hm)} (${tiedOpposite.entry.hall}), which is ${topIsCentro ? 'acentric' : 'centrosymmetric'}
                where this one is ${topIsCentro ? 'centrosymmetric' : 'acentric'}.</strong> Systematic absences alone cannot break a centrosymmetric/acentric tie — Friedel's law makes both look
@@ -1948,14 +1948,14 @@
       const nonMero = findings.filter(x => x.kind === 'nonmero' && !x.text.startsWith('twin of index 2'));
       const nonMeroIdx2 = findings.filter(x => x.kind === 'nonmero' && x.text.startsWith('twin of index 2') && !idx2Written);
       const nonMeroInsNote = (nonMero.length
-        ? `<p style="color:#b60"><strong>⚠ ${nonMero.map(x => x.text).join(' · ')}</strong> — this .ins (HKLF 4) cannot handle it; refine against an HKLF 5 file (PLATON TwinRotMat or TWINABS). See <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">tab 3</a>.</p>`
+        ? `<p style="color:#b60"><strong>⚠ ${nonMero.map(x => x.text).join(' · ')}</strong> — this .ins (HKLF 4) cannot handle it; refine against an HKLF 5 file (PLATON TwinRotMat or TWINABS). See <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">the Twins tab</a>.</p>`
         : '') + (nonMeroIdx2.length
-        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${nonMeroIdx2.map(x => x.text).join(' · ')} — refined with TWIN in HKLF 4; tick it on <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">tab 3</a> to add TWIN/BASF.</p>`
+        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${nonMeroIdx2.map(x => x.text).join(' · ')} — refined with TWIN in HKLF 4; tick it on <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">the Twins tab</a> to add TWIN/BASF.</p>`
         : '');
       const notWritten = findings.filter(x => x.kind !== 'nonmero').filter(x => x.kind === 'law' ? !(written && written.matrix.flat().join(' ') !== '-1 0 0 0 -1 0 0 0 -1')
         : !(written && (written.n === -4 || written.matrix.flat().join(' ') === '-1 0 0 0 -1 0 0 0 -1'))).filter(x => x.kind === 'law' || !hallSymbolIsCentrosymmetric(top.hall));
       const twinInsNote = notWritten.length
-        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${notWritten.map(x => x.text).join(' · ')} — tick it on <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">tab 3</a> to add TWIN/BASF.</p>`
+        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${notWritten.map(x => x.text).join(' · ')} — tick it on <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">the Twins tab</a> to add TWIN/BASF.</p>`
         : '';
 
       const settingNote = settingTransform
