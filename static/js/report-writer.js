@@ -205,7 +205,7 @@ function reportCollect(opts) {
   if (!cell) add('bad', 'No complete unit cell — nothing could be analysed.', null);
   const tf = twinFindings() || [];
   const twinNotInIns = !!(S.ins && S.ins.notes && S.ins.notes.twin);
-  for (const f of tf) add('warn', f.kind === 'nonmero' ? `${f.text} — needs an HKLF 5 file (PLATON TwinRotMat, TWINABS); the .ins cannot model it.`
+  for (const f of tf) add('warn', f.kind === 'nonmero' ? (f.text.startsWith('twin of index 2') ? `${f.text} — refined with TWIN and HKLF 4 (no HKLF 5 file needed)${S.ins && S.ins.twin && S.ins.twin.matrix.flat().some(x => Math.abs(x - Math.round(x)) > 0.25) ? '; written to the .ins' : '; tick it on tab 3 to write TWIN/BASF to the .ins'}.` : `${f.text} — needs an HKLF 5 file (PLATON TwinRotMat, TWINABS); the .ins cannot model it.`)
     : `${f.kind === 'inversion' ? 'Inversion twin' : 'Twinning'}: ${f.text}${twinNotInIns && S.ins.notes.twin.includes(f.text) ? ' — <em>not written to the .ins</em> (tick it on tab 3 to add TWIN/BASF)' : ''}`, 'sec-twin');
   for (const f of absFindings()) add(f.text.includes('inverted') ? 'bad' : 'warn', `Absolute structure: ${f.text}`, 'sec-twin');
   for (const sec of S.twinSections || []) {
@@ -409,8 +409,10 @@ function reportCollect(opts) {
     if (an && an.enough) {
       const rows = [['Bijvoet pairs', `${an.pairs}${an.calibrated ? '' : ' <small>(σ not calibrated — merged data)</small>'}`], ['Anomalous signal χ²', `${an.chi2.toFixed(2)} <small>(1 = noise only)</small>`]];
       if (an.twin) {
-        rows.push(['Expected χ² (no inversion twin)', an.twin.expectedChi2.toFixed(1)]);
-        rows.push(['Inversion-twin fraction x', `${an.twin.x.toFixed(2)} ± ${an.twin.xSe.toFixed(2)} — ${rptEsc(an.twin.verdict)} <small>(model-free, no sign)</small>`]);
+        rows.push(['Expected χ² (no inversion twin)', an.twin.fromModel ? `${an.twin.expectedChi2.toFixed(2)} <small>from the refined model (${an.twin.composedChi2.toFixed(1)} from the composition)</small>` : an.twin.expectedChi2.toFixed(1)]);
+        if (an.twin.fromModel && an.modelExpect && an.modelExpect.weak) rows.push(['Inversion-twin fraction x', `not judged model-free — the refined model expects χ² ≈ ${an.twin.expectedChi2.toFixed(2)} only <small>(see the refined-model table)</small>`]);
+        else if (an.twin.fromModel) rows.push(['Inversion-twin fraction x', `${an.twin.x.toFixed(2)} — ${rptEsc(an.twin.verdict)} <small>(observed χ² against the refined model's expectation, no sign)</small>`]);
+        else rows.push(['Inversion-twin fraction x', `${an.twin.x.toFixed(2)} ± ${an.twin.xSe.toFixed(2)} — ${rptEsc(an.twin.verdict)} <small>(model-free, no sign)</small>`]);
       }
       twinBlocks.push({ t: 'kv', caption: 'Inversion twin from the Bijvoet pairs', rows });
     }

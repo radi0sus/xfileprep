@@ -23,8 +23,22 @@
 //
 // Supported: SHELXL .res with LATT/SYMM, short or long SFAC, DISP, FVAR free
 // variables, riding Uiso, anisotropic U, EXTI, HKLF 4 with a matrix, OMIT hkl,
-// SHEL, TWIN only as a pure inversion twin. Not: other twin laws, HKLF 5,
-// SWAT, multipoles — those return {applicable: false, reason}.
+// SHEL, TWIN (merohedral, see twinComponents) with or without inversion.
+// Not: HKLF 5, SWAT, multipoles — those return {applicable: false, reason}.
+//
+// Twins: with TWIN/BASF the model intensity is Σ k_j |Fc(R_j h)|² over the
+// twin components (SHELXL order, k_1 = 1 − ΣBASF). Components with det < 0
+// contain the inversion; their summed fraction is the inversion share x. With
+// a_j = k(R_j) + k(−R_j) over the proper components (normalised),
+//   I(h) = (1 − x) Σ a_j |Fc(R_j h)|² + x Σ a_j |Fc(−R_j h)|²,
+// which is the untwinned form with twin-averaged |Fc|²: Flack, Parsons and
+// Hooft then estimate the inversion share and should come out near the
+// refined Σ BASF of the det < 0 components. This assumes the fractions
+// factorise, k(±R_j) = a_j·(1 − x | x); real refinements are close to that.
+// yw6 (P 21, TWIN -1 0 0 0 -1 0 0 0 1 -4, refined inversion share 0.449):
+// Parsons 0.447(7), Hooft 0.450(6), Flack 0.456(10); yw44 (same law, 0.521):
+// 0.514(6), 0.518(6), 0.519(7). The extra twin component costs one more
+// structure-factor evaluation per reflection (yw6, 404 atoms: about 2.5 s).
 
 const SHELX_COMMANDS = new Set(('TITL CELL ZERR LATT SYMM SFAC DISP UNIT LAUE REM MORE TIME END HKLF OMIT SHEL BASF TWIN ' +
   'EXTI SWAT HOPE MERG SPEC RESI MOVE ANIS AFIX HFIX FRAG FEND EXYZ EADP EQIV CONN PART BIND FREE DFIX DANG BUMP SAME ' +
@@ -452,12 +466,9 @@ async function computeAbsoluteStructure(cifText, reflections, onProgress) {
   if (model.latt > 0) return { applicable: false, reason: 'the space group is centrosymmetric (LATT > 0) — no absolute structure', reported };
   if (model.hklf && model.hklf.n === 5) return { applicable: false, reason: 'HKLF 5 (non-merohedral twin) is not supported', reported };
   if (model.swat) return { applicable: false, reason: 'SWAT (solvent model) is not supported', reported };
-  let inversionTwin = false;
-  if (model.twin) {
-    const isInv = model.twin.matrix.every((r, i) => r.every((x, j) => Math.abs(x - (i === j ? -1 : 0)) < 1e-6)) && Math.abs(model.twin.n) === 2;
-    if (!isInv) return { applicable: false, reason: 'refined with a twin law other than inversion (TWIN) — not supported yet', reported };
-    inversionTwin = true;
-  }
+  const tw = model.twin ? twinComponents(model.twin, model.basf) : null;
+  if (tw && tw.error) return { applicable: false, reason: tw.error, reported };
+  const inversionTwin = !!tw;
   const recip = reciprocalCellFromDirect(model.cell);
   const atoms = decodeAtoms(model, recip);
   if (!atoms.length) return { applicable: false, reason: 'no atoms found in the embedded .res', reported };
@@ -468,6 +479,20 @@ async function computeAbsoluteStructure(cifText, reflections, onProgress) {
 
   // point group (rotations of the non-centring operators) for merging
   const pg = [...new Map(ops.map(o => [o.R.flat().join(','), o.R])).values()];
+  // merging under pg is only valid for the twinned pattern if every twin
+  // operator maps the point group onto itself
+  if (tw && !tw.proper.every(c => twinNormalisesPG(c.M, pg))) return { applicable: false, reason: 'the twin law does not map the point group onto itself — merging the twinned data is not valid', reported };
+  // |Fc|² of h and −h, averaged over the proper twin components (no twin: just Fc)
+  const twinFc = h => {
+    if (!tw) return fc(h);
+    let fp2 = 0, fm2 = 0, s = 0;
+    for (const c of tw.proper) {
+      const M = c.M, hh = [0, 1, 2].map(i => Math.round(M[i][0] * h[0] + M[i][1] * h[1] + M[i][2] * h[2]));
+      const f = fc(hh);
+      fp2 += c.a * extCorr(f.fp2, f.s); fm2 += c.a * extCorr(f.fm2, f.s); if (c.M === tw.proper[0].M) s = f.s;
+    }
+    return { fp2, fm2, s, extDone: true };
+  };
 
   // reflections in the refinement setting, OMIT/SHEL applied
   const M = model.hklf && model.hklf.matrix;
@@ -514,8 +539,8 @@ async function computeAbsoluteStructure(cifText, reflections, onProgress) {
     if (e.n >= 2) sig = Math.max(sig, Math.sqrt(Math.max(0, e.swii - e.sw * I * I) / ((e.n - 1) * e.sw)));
     const keyM = canonicalHKL(-e.h[0], -e.h[1], -e.h[2], pg).join(',');
     const centric = keyM === key;
-    const f = fc(e.h);
-    const fp2 = extCorr(f.fp2, f.s), fm2 = extCorr(f.fm2, f.s);
+    const f = twinFc(e.h);
+    const fp2 = f.extDone ? f.fp2 : extCorr(f.fp2, f.s), fm2 = f.extDone ? f.fm2 : extCorr(f.fm2, f.s);
     items.push({ key, keyM, I, sig, fp2, fm2, centric, s: f.s });
   }
   const byKey = new Map(items.map(it => [it.key, it]));
@@ -612,12 +637,69 @@ async function computeAbsoluteStructure(cifText, reflections, onProgress) {
 
   return {
     applicable: true, reported, inversionTwin, basf: model.basf,
+    twinLaw: tw && !tw.pureInversion ? { matrix: model.twin.matrix, n: model.twin.n, xRefined: tw.xRefined, nComponents: tw.components.length } : null,
     nAtoms: atoms.length, nOps: ops.length, nRaw, nUnique: items.filter(it => it.fp2 + it.fm2 >= 1e-6 * meanFc2).length, nPairs: pairs.length,
     r1, scale: k, flack, parsons, hooft,
     signal: meanAbsDc / meanSD,
+    // Bijvoet χ² the model expects for an enantiopure crystal; the model-free
+    // check (anomalous-check.js) uses it instead of its composition estimate,
+    // which assumes randomly placed atoms
+    expectedChi2: 1 + D.reduce((a, d) => a + (d.sD > 0 ? (d.Dc / d.sD) ** 2 : 0), 0) / D.length,
     dispersion: { missing: sc.missing, fromTable: sc.fromTable, fromCif: !!cifDisp },
     exti: model.exti, hklfMatrix: !!M,
   };
+}
+
+// Twin components as SHELXL builds them from TWIN R N and BASF: N > 0 gives
+// R^0 … R^(N−1); N < 0 gives R^0 … R^(|N|/2−1) followed by their negatives.
+// Returns the proper (det > 0) components with weights a (normalised, each
+// together with its inverted partner), the refined inversion share xRefined,
+// or {error}. The set must be closed under −1 (else the inversion share is
+// not separable from the twin law).
+function twinComponents(twin, basf) {
+  const R = twin.matrix, n = twin.n || 2, m = Math.abs(n);
+  const mul = (A, B) => A.map((r, i) => [0, 1, 2].map(j => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]));
+  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const pows = [I];
+  const nProper = n < 0 ? m / 2 : m;
+  if (!Number.isInteger(nProper) || m < 2) return { error: `TWIN with N = ${n} is not supported` };
+  for (let j = 1; j < nProper; j++) pows.push(mul(pows[j - 1], R));
+  const mats = n < 0 ? [...pows, ...pows.map(M => M.map(r => r.map(x => -x)))] : pows;
+  if ((basf || []).length < mats.length - 1) return { error: `TWIN needs ${mats.length - 1} BASF value(s), the .res has ${(basf || []).length}` };
+  const k = [1 - basf.slice(0, mats.length - 1).reduce((a, b) => a + b, 0), ...basf.slice(0, mats.length - 1)];
+  const det = M => M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+  const same = (A, B) => A.every((r, i) => r.every((x, j) => Math.abs(x - B[i][j]) < 1e-6));
+  const components = mats.map((M, i) => ({ M, k: k[i], inv: det(M) < 0 }));
+  const proper = [];
+  for (const c of components) {
+    const neg = c.M.map(r => r.map(x => -x));
+    const partner = components.find(d => same(d.M, neg));
+    if (!partner) return { error: 'twin law not closed under inversion (e.g. a mirror twin without −1) — inversion share not separable' };
+    if (!c.inv) proper.push({ M: c.M, a: c.k + partner.k });
+  }
+  const sa = proper.reduce((a, c) => a + c.a, 0);
+  if (!(sa > 0)) return { error: 'twin fractions (BASF) do not add up' };
+  for (const c of proper) c.a /= sa;
+  const xRefined = components.filter(c => c.inv).reduce((a, c) => a + c.k, 0);
+  const pureInversion = proper.length === 1;
+  return { components, proper, xRefined, pureInversion };
+}
+
+// Does the twin operator M (h' = M h, SHELX) map the point group onto itself?
+// pg rotations act on index rows (h' = h·R, as in canonicalHKL).
+function twinNormalisesPG(M, pg) {
+  const A = [0, 1, 2].map(i => [0, 1, 2].map(j => M[j][i])); // row form: h' = h·Mᵀ
+  const det = A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+  if (Math.abs(det) < 1e-9) return false;
+  const inv = [0, 1, 2].map(i => [0, 1, 2].map(j => {
+    const r = [0, 1, 2].filter(x => x !== j), c = [0, 1, 2].filter(x => x !== i);
+    const minor = A[r[0]][c[0]] * A[r[1]][c[1]] - A[r[0]][c[1]] * A[r[1]][c[0]];
+    return ((i + j) % 2 ? -1 : 1) * minor / det;
+  }));
+  const mul = (X, Y) => X.map(r => [0, 1, 2].map(j => r[0] * Y[0][j] + r[1] * Y[1][j] + r[2] * Y[2][j]));
+  const key = X => X.flat().map(x => Math.round(x)).join(',');
+  const keys = new Set(pg.map(key));
+  return pg.every(Rg => { const C = mul(mul(inv, Rg), A); return C.flat().every(x => Math.abs(x - Math.round(x)) < 1e-6) && keys.has(key(C)); });
 }
 
 // Verdict from x and its su (Flack & Bernardinelli 2000). x a few su below 0

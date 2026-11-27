@@ -148,6 +148,52 @@ function lePageTwoFolds(cell, centering = 'P (primitive)', maxDelta = LEPAGE_MAX
   return [...found.values()].sort((x, y) => x.delta - y.delta);
 }
 
+// 2-folds of twin index 2 (twinning by reticular pseudo-merohedry): the
+// rotation maps only a sub-lattice of index 2 onto the lattice, its matrix has
+// halves (yw27, P 21/n, c = 49.8 Å, β = 93.1°: 2-fold about c*, direct row
+// [1 0 4], refined as TWIN -1 0 0 0 -1 0 0.505 0 1 — l' = l + h/2, so only
+// reflections with h even overlap). t up to N = 4, as such rows are longer.
+// The obliquity can be ~0°: these never pass as merohedral, because half the
+// reflections have no partner. Same return shape as lePageTwoFolds (+ index).
+function lePageIndex2TwoFolds(cell, centering = 'P (primitive)', maxDelta = 3, N = 4, Nh = 2) {
+  if ((CENTERING_VECTORS[centering] || []).length) return []; // primitive lattices only
+  const d2r = Math.PI / 180;
+  const { a, b, c } = cell;
+  const al = cell.alpha * d2r, be = cell.beta * d2r, ga = cell.gamma * d2r;
+  const cx = c * Math.cos(be), cy = c * (Math.cos(al) - Math.cos(be) * Math.cos(ga)) / Math.sin(ga);
+  const A = [[a, 0, 0], [b * Math.cos(ga), b * Math.sin(ga), 0], [cx, cy, Math.sqrt(Math.max(0, c * c - cx * cx - cy * cy))]];
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  const cross = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const V = dot(A[0], cross(A[1], A[2]));
+  const Rr = [cross(A[1], A[2]), cross(A[2], A[0]), cross(A[0], A[1])].map(v => v.map(x => x / V));
+  const cart = (t, B) => [0, 1, 2].map(j => t[0] * B[0][j] + t[1] * B[1][j] + t[2] * B[2][j]);
+  const gcd = (x, y) => (y ? gcd(y, x % y) : Math.abs(x));
+  const found = new Map();
+  for (let u = -N; u <= N; u++) for (let v = -N; v <= N; v++) for (let w = -N; w <= N; w++) {
+    if (!u && !v && !w) continue;
+    if (gcd(gcd(u, v), w) !== 1) continue; // primitive rows only
+    const t = [u, v, w], tc = cart(t, A), tl = Math.sqrt(dot(tc, tc));
+    for (let h = -Nh; h <= Nh; h++) for (let k = -Nh; k <= Nh; k++) for (let l = -Nh; l <= Nh; l++) {
+      if (!h && !k && !l) continue;
+      if (gcd(gcd(h, k), l) !== 1) continue;
+      const th = u * h + v * k + w * l;
+      if (th <= 0) continue;
+      const hc = cart([h, k, l], Rr);
+      const delta = Math.acos(Math.min(1, dot(tc, hc) / (tl * Math.sqrt(dot(hc, hc))))) / d2r;
+      if (delta > maxDelta) continue;
+      const hh = [h, k, l];
+      const Rf = [0, 1, 2].map(i => [0, 1, 2].map(j => 2 * t[i] * hh[j] / th - (i === j ? 1 : 0)));
+      const halves = Rf.flat().every(x => Math.abs(2 * x - Math.round(2 * x)) < 1e-6);
+      const integral = Rf.flat().every(x => Math.abs(x - Math.round(x)) < 1e-6);
+      if (!halves || integral) continue;
+      const R = Rf.map(r => r.map(x => Math.round(2 * x) / 2));
+      const key = twinMatrixKey(R);
+      if (!found.has(key) || found.get(key).delta > delta) found.set(key, { R, delta, t, h: hh, index: 2 });
+    }
+  }
+  return [...found.values()].sort((x, y) => x.delta - y.delta);
+}
+
 // Closure of a set of integer matrices (h' = h M); null if it exceeds 48
 // elements (inconsistent approximate axes).
 function closeMatrixGroup(gens) {
@@ -324,7 +370,19 @@ function checkNonMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis
   const inG = new Set(G.map(twinMatrixKey));
   const folds = lePageTwoFolds(cell, centering, NONMERO_MAX_DELTA)
     .filter(f => f.delta > NONMERO_MIN_DELTA && !inG.has(twinMatrixKey(f.R)));
-  if (!folds.length) return { applicable: false, reason: `no lattice 2-fold with an obliquity of ${NONMERO_MIN_DELTA}–${NONMERO_MAX_DELTA}° outside the Laue class` };
+  // index-2 2-folds: one per Laue-equivalent family (R·g for g in G gives the same twin)
+  const idx2 = [];
+  const famKeys = new Set();
+  const mul = (X, Y) => X.map(r => [0, 1, 2].map(j => r[0] * Y[0][j] + r[1] * Y[1][j] + r[2] * Y[2][j]));
+  for (const f of lePageIndex2TwoFolds(cell, centering)) {
+    const fam = G.map(g => twinMatrixKey(mul(f.R, g))).sort()[0];
+    if (famKeys.has(fam)) continue;
+    famKeys.add(fam);
+    idx2.push(f);
+    if (idx2.length >= 6) break;
+  }
+  folds.push(...idx2);
+  if (!folds.length) return { applicable: false, reason: `no lattice 2-fold with an obliquity of ${NONMERO_MIN_DELTA}–${NONMERO_MAX_DELTA}° outside the Laue class, and none of twin index 2` };
 
   // Cartesian bases (rows): direct A, reciprocal Rr
   const d2r = Math.PI / 180;
@@ -351,7 +409,15 @@ function checkNonMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis
   }
   for (const e of merged.values()) { e.I = e.swi / e.sw; e.s = Math.sqrt(1 / e.sw); }
 
+  // Overlap tolerance: at most a quarter of the shortest reciprocal axis. With a
+  // long axis (yw27, c = 49.8 Å, c* = 0.020 Å⁻¹) 0.01 Å⁻¹ is half a reflection
+  // spacing: images exactly between two points (h odd for an index-2 twin)
+  // then count as overlaps and dilute the H test (α 0.04 instead of 0.15).
+  const minRecip = Math.min(...Rr.map(v => Math.sqrt(dot(v, v))));
+  const tol = Math.min(NONMERO_OVERLAP, 0.25 * minRecip);
+
   const laws = [];
+  const seenMatrix = new Set();
   for (const f of folds) {
     for (const about of ['reciprocal', 'direct']) {
       const u0 = about === 'direct' ? cart(f.t, A) : cart(f.h, Rr);
@@ -361,6 +427,10 @@ function checkNonMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis
       const img = hk => { const hc = cart(hk, Rr); const p = 2 * dot(hc, u); const hp = [0, 1, 2].map(i => p * u[i] - hc[i]); return { hp, fi: [0, 1, 2].map(j => dot(hp, A[j])) }; };
       const cols = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(e => img(e).fi);
       const matrix = [0, 1, 2].map(i => [0, 1, 2].map(j => cols[j][i]));
+      // the same rotation can come from several (t, h) choices: test it once
+      const mKey = matrix.flat().map(x => x.toFixed(3)).join(',');
+      if (seenMatrix.has(mKey)) continue;
+      seenMatrix.add(mKey);
       let overlaps = 0;
       const Hs = [];
       const seen = new Set();
@@ -369,7 +439,7 @@ function checkNonMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis
         const g = fi.map(Math.round);
         const gc = cart(g, Rr);
         const dist = Math.hypot(hp[0] - gc[0], hp[1] - gc[1], hp[2] - gc[2]);
-        if (dist > NONMERO_OVERLAP) continue;
+        if (dist > tol) continue;
         overlaps++;
         const key2 = canonicalHKL(g[0], g[1], g[2], G).join(',');
         if (key2 === key) continue;
@@ -390,12 +460,19 @@ function checkNonMerohedralTwinning(reflections, cell, laueClass, monoclinicAxis
       const alphaSe = sd !== null ? sd / Math.sqrt(n) : null;
       const alpha = alphaRaw === null ? null : Math.max(0, alphaRaw);
       let verdict;
+      // twin index from the index matrix: halves (not integers) = index 2
+      const index = matrix.flat().every(x => Math.abs(2 * x - Math.round(2 * x)) < 0.06) && matrix.flat().some(x => Math.abs(x - Math.round(x)) > 0.25) ? 2 : 1;
       if (n < 100) verdict = 'too few overlapping pairs';
-      else if (alpha >= TWIN_SIGNIFICANT_ALPHA && alpha > 3 * alphaSe) verdict = 'twinned (non-merohedral)';
+      else if (alpha >= TWIN_SIGNIFICANT_ALPHA && alpha > 3 * alphaSe) verdict = index === 2 ? 'twinned (index 2)' : 'twinned (non-merohedral)';
       else verdict = 'no indication';
-      laws.push({ axis: f.t, plane: f.h, about, delta: f.delta, matrix, overlaps, pairs: n, meanH, alpha, alphaSe, verdict, hValues: used });
+      laws.push({ axis: f.t, plane: f.h, about, delta: f.delta, matrix, overlaps, pairs: n, meanH, alpha, alphaSe, verdict, hValues: used, index });
     }
   }
-  laws.sort((x, y) => (y.verdict.startsWith('twinned') - x.verdict.startsWith('twinned')) || ((y.alpha || 0) - (x.alpha || 0)));
-  return { applicable: true, laws, overlapTolerance: NONMERO_OVERLAP };
+  laws.sort((x, y) => (y.verdict.startsWith('twinned') - x.verdict.startsWith('twinned')) || ((y.alpha || 0) - (x.alpha || 0)) || (x.delta - y.delta));
+  // one row per twin: M and M·g (g in the Laue group, incl. −1) are the same twin
+  const GT = G.map(g => [0, 1, 2].map(i => [0, 1, 2].map(j => g[j][i])));
+  const famKey = M => GT.flatMap(g => [mul(M, g), mul(g, M)]).map(X => X.flat().map(x => (Math.round(x * 50) / 50 + 0).toFixed(2)).join(',')).sort()[0];
+  const fams = new Set();
+  const unique = laws.filter(L => { const k = famKey(L.matrix); if (fams.has(k)) return false; fams.add(k); return true; });
+  return { applicable: true, laws: unique, overlapTolerance: +tol.toPrecision(2) };
 }

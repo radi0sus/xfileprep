@@ -346,6 +346,7 @@
     // TWIN/BASF lines go into the .ins only if the person ticks the box.
     let lastTwinCheck = null;      // result of checkMerohedralTwinning, or null
     let twinWriteToIns = false;    // checkbox state, survives re-renders of the section
+    let idx2WriteToIns = false;    // same for a twin of index 2 (non-merohedral check)
     // Hint on the E² tab: twinning narrows the intensity distribution (N(z),
     // <|E²-1|>), so the centro/acentric verdict there is not reliable.
     let lastEStatVerdict = null; // 'centrosymmetric' | 'acentric' from the E² tab
@@ -375,14 +376,14 @@
       }
       if (lastNonMeroCheck && lastNonMeroCheck.applicable) {
         const nm = lastNonMeroCheck.laws.find(L => L.verdict.startsWith('twinned'));
-        if (nm) out.push({ kind: 'nonmero', text: `non-merohedral twin, 2-fold about ${nm.about === 'direct' ? `[${reducedDirection(nm.axis).join(' ')}]` : `(${reducedDirection(nm.plane).join(' ')})*`} (δ ${nm.delta.toFixed(1)}°, α ≈ ${nm.alpha.toFixed(2)} on overlaps)` });
+        if (nm) out.push({ kind: 'nonmero', text: `${nm.index === 2 ? 'twin of index 2' : 'non-merohedral twin'}, 2-fold about ${nm.about === 'direct' ? `[${reducedDirection(nm.axis).join(' ')}]` : `(${reducedDirection(nm.plane).join(' ')})*`} (δ ${nm.delta.toFixed(1)}°, α ≈ ${nm.alpha.toFixed(2)} on overlaps)` });
       }
       const t = lastAnomalousCheck && lastAnomalousCheck.twin;
       const sel = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
       // an inversion twin only exists in an acentric space group
       // with a refined model, its sign-carrying result replaces the model-free estimate (absFindings)
       const modelDecides = lastAbsStructure && lastAbsStructure.applicable;
-      if (!modelDecides && t && t.x >= 0.1 && t.expectedChi2 >= 1.5 && sel && !hallSymbolIsCentrosymmetric(sel.hall)) out.push({ kind: 'inversion', text: `inversion twin, x ≈ ${t.x.toFixed(2)}${t.x >= 0.35 ? ' (or centrosymmetric)' : ''}` });
+      if (!modelDecides && t && !lastAnomalousCheck.systematic && t.x >= 0.1 && t.expectedChi2 >= 1.5 && sel && !hallSymbolIsCentrosymmetric(sel.hall)) out.push({ kind: 'inversion', text: `inversion twin, x ≈ ${t.x.toFixed(2)}${t.x >= 0.35 ? ' (or centrosymmetric)' : ''}` });
       return out.length ? out : null;
     }
 
@@ -490,6 +491,8 @@
       if (nhEl && lastTwinCheck && lastTwinCheck.applicable) renderNHPlot(nhEl, lastTwinCheck.laws);
       const cb = document.getElementById('twinToIns');
       if (cb) cb.addEventListener('change', () => { twinWriteToIns = cb.checked; if (lastMatchResults) generateIns(); });
+      const cbIdx2 = document.getElementById('idx2TwinToIns');
+      if (cbIdx2) cbIdx2.addEventListener('change', () => { idx2WriteToIns = cbIdx2.checked; if (lastMatchResults) generateIns(); });
       const cbInv = document.getElementById('invTwinToIns');
       if (cbInv) cbInv.addEventListener('change', () => { invTwinWriteToIns = cbInv.checked; if (lastMatchResults) generateIns(); });
       if (lastMatchResults) generateIns();
@@ -574,23 +577,31 @@
         const fm = M => M.map(r => r.map(x => x.toFixed(3)).join(' ')).join(' / ');
         const rows = res.laws.map(L => {
           const color = L.verdict.startsWith('twinned') ? '#b60' : L.verdict.startsWith('too few') ? '#888' : '#080';
-          return `<tr><td>2-fold about ${L.about === 'direct' ? `[${reducedDirection(L.axis).join(' ')}]` : `(${reducedDirection(L.plane).join(' ')})*`}</td><td>${L.delta.toFixed(2)}°</td>
+          return `<tr><td>2-fold about ${L.about === 'direct' ? `[${reducedDirection(L.axis).join(' ')}]` : `(${reducedDirection(L.plane).join(' ')})*`}${L.index === 2 ? ' <small>(index 2)</small>' : ''}</td><td>${L.delta.toFixed(2)}°</td>
             <td><code style="font-size:0.85em">${fm(L.matrix)}</code></td><td>${L.overlaps}</td><td>${L.pairs}</td>
             <td>${L.alpha === null ? '—' : `${L.alpha.toFixed(2)} <small>± ${L.alphaSe.toFixed(3)}</small>`}</td><td style="color:${color}">${L.verdict}</td></tr>`;
         }).join('');
         const nm = res.laws.find(L => L.verdict.startsWith('twinned'));
         sec.result = nm ? `2-fold about ${nm.about === 'direct' ? `[${reducedDirection(nm.axis).join(' ')}]` : `(${reducedDirection(nm.plane).join(' ')})*`}, δ ${nm.delta.toFixed(1)}°, α ≈ ${nm.alpha.toFixed(2)}`
           : `${res.laws.length} axis${res.laws.length === 1 ? '' : 'es'} tested`;
-        if (nm) Object.assign(sec, { verdict: 'twinned — needs HKLF 5', color: '#b60', level: 'warn' });
+        if (nm) Object.assign(sec, { verdict: nm.index === 2 ? 'twinned (index 2) — TWIN in HKLF 4' : 'twinned — needs HKLF 5', color: '#b60', level: 'warn' });
         let html = `<table class="shellTable"><thead><tr><th>Twin law</th><th>Obliquity δ</th><th>Matrix h′ = M h (rows)</th><th title="Reflections whose twin image lies within the overlap tolerance">Overlapping</th>
             <th title="Overlapping pairs with both partners measured, I1+I2 > 10σ">Pairs</th><th>Fraction α (overlaps)</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>`;
         html += pseudoTranslationWarning('twin');
-        if (nm) html += `<p style="color:#b60"><small><strong>A non-merohedral twin needs an HKLF 5 reflection file</strong> (each overlapping reflection with both components), e.g. from PLATON (TwinRotMat, after a first refinement)
+        const half = x => { const v = Math.round(2 * x) / 2; return (Object.is(v, -0) ? 0 : v).toString(); };
+        if (nm && nm.index === 2) html += `<p style="color:#b60"><small><strong>Twin of index 2</strong> (twinning by reticular pseudo-merohedry): the 2-fold maps only every second
+            reciprocal-lattice point onto another one, so only those reflections overlap — here the ${nm.overlaps} whose image has integral indices; the others belong to one domain only.
+            It is refined with HKLF 4 — SHELXL gives the second domain no contribution where the transformed indices are not integral; no HKLF 5 file is needed.</small></p>
+            <p><label><input type="checkbox" id="idx2TwinToIns" ${idx2WriteToIns ? 'checked' : ''}> <span>write <code>TWIN ${nm.matrix.flat().map(half).join(' ')}</code> with <code>BASF ${nm.alpha.toFixed(2)}</code> to the .ins</span></label></p>`;
+        else if (nm) html += `<p style="color:#b60"><small><strong>A non-merohedral twin needs an HKLF 5 reflection file</strong> (each overlapping reflection with both components), e.g. from PLATON (TwinRotMat, after a first refinement)
             or TWINABS — a TWIN matrix in HKLF 4 mode would treat every reflection as overlapped, so the .ins gets nothing from here.</small></p>`;
         html += howToRead(`Lattice 2-fold axes with an obliquity of 1–6° map the lattice onto itself only approximately: the spots of both domains overlap only where the rotated
           reciprocal-lattice point lands within ${res.overlapTolerance} Å⁻¹ of another one (mostly at low angle). The H test is run on those overlapping pairs only; the rotation is tried about the
           direct row and about the reciprocal row. Pseudo-symmetry makes intensities similar at any distance, a twin only where the spots overlap — untwinned test data stay at α ≈ 0.
-          α refers to the overlapping reflections only; the refined BASF over all data is usually lower.`);
+          α refers to the overlapping reflections only; the refined BASF over all data is usually lower.
+          Also tested: 2-folds of <strong>twin index 2</strong>, whose matrix contains halves (e.g. l′ = l + h/2 in a monoclinic cell with a long axis): they map only a
+          sub-lattice onto the lattice, so exactly the reflections with integral image indices overlap, at any angle. The tolerance is at most a quarter of the shortest
+          reciprocal axis (here ${res.overlapTolerance} Å⁻¹), so that images half-way between two points never count as overlaps.`);
         sec.body = html;
       } catch (err) {
         Object.assign(sec, { verdict: 'check failed', color: '#b00', level: 'none', body: `<p style="color:#b00"><small>Could not run the non-merohedral check: ${err.message}</small></p>` });
@@ -630,6 +641,18 @@
         : 'the wavelength is none of the tabulated lines (Ti, Cr, Fe, Co, Cu, Mo, Ag, W, Au, U Kα)';
       return { fpp: any ? fpp : null, source: parts.join('; '), note };
     }
+    // BASF for the inversion twin, or null: the refined model's x when one is
+    // loaded (Parsons, else Hooft), otherwise the model-free estimate.
+    function invTwinBasf() {
+      const a = lastAbsStructure && lastAbsStructure.applicable ? lastAbsStructure : null;
+      if (a && (a.parsons || a.hooft)) {
+        const x = a.parsons ? a.parsons.x : a.hooft.y, su = a.parsons ? a.parsons.su : a.hooft.su;
+        return absStructureVerdict(x, su).level === 'warn' && x >= 0.05 && x <= 0.95 ? Math.min(x, 1 - x) : null;
+      }
+      const t = lastAnomalousCheck && lastAnomalousCheck.twin;
+      return t && !lastAnomalousCheck.systematic && t.x >= 0.1 && t.expectedChi2 >= 1.5 ? t.x : null;
+    }
+
     function inversionTwinSection(cell) {
       const sec = { id: 'bijvoet', short: 'Inversion twin (model-free)', title: 'Inversion twin — Bijvoet pairs, model-free', result: '', verdict: '', color: '#888', level: 'none', body: '' };
       const absNote = lastAbsStructure && lastAbsStructure.applicable ? `<p><small>A refined model is loaded: the section below gives x <em>with</em> sign (Flack, Parsons, Hooft).</small></p>` : '';
@@ -655,20 +678,59 @@
         let html = `<p>${res.pairs} Bijvoet pairs <small>(${pgNote}; ${sigmaNote})</small><br>
           Observed anomalous signal: χ² = <strong>${res.chi2.toFixed(2)}</strong> <small>(1 = noise only${res.controlChi2 !== null ? `; control, other acentric half of the Laue group: χ² = ${res.controlChi2.toFixed(2)}` : '; no control split for this Laue class'})</small>`;
         sec.result = `χ² = ${res.chi2.toFixed(2)}`;
-        if (res.twin) {
+        // With a refined model, the expected signal comes from Δcalc: the
+        // composition estimate assumes randomly placed atoms and overstates it
+        // badly when the anomalous scatterers sit (almost) centrosymmetrically
+        // (jm7_26: 3.7 from the composition, 1.05 from the model).
+        const am = lastAbsStructure && lastAbsStructure.applicable && lastAbsStructure.expectedChi2 ? lastAbsStructure : null;
+        res.modelExpect = null;
+        if (res.twin && am) {
+          const floor = res.controlChi2 !== null ? Math.max(1, res.controlChi2) : 1;
+          const e = am.expectedChi2, weak = e < 1.5;
+          const r = Math.min(1, Math.sqrt(Math.max(0, res.chi2 - floor) / Math.max(1e-9, e - 1)));
+          const x = (1 - r) / 2;
+          const verdict = weak ? 'expected signal too weak to judge' : x < 0.1 ? 'enantiopure — no inversion twinning' : x < 0.35 ? 'partial inversion twin' : 'racemic (inversion) twin near 50:50 — or centrosymmetric';
+          res.modelExpect = { expectedChi2: e, x: weak ? null : x, weak, verdict };
+          res.twin = Object.assign({}, res.twin, { composedChi2: res.twin.expectedChi2, expectedChi2: e, x: weak ? res.twin.x : x, verdict, fromModel: true });
+        }
+        // Two cases where an inversion-twin fraction means nothing (yw27, P 21/n:
+        // Pn split χ² 1.39, control 1.32, and the old code still said "partial
+        // inversion twin, x ≈ 0.28"):
+        //  - the selected group is centrosymmetric and Friedel's law is not broken:
+        //    the Pn check only confirms the centrosymmetric choice;
+        //  - the excess over χ² = 1 is systematic (control split): no x from it.
+        const centroOk = ref !== sel && res.acentricEvidence !== 'strong';
+        if (res.twin && (centroOk || res.systematic)) {
+          sec.result += ` · control ${res.controlChi2 !== null ? res.controlChi2.toFixed(2) : '—'}`;
+          if (centroOk) {
+            Object.assign(sec, { verdict: `Friedel's law holds — fits ${formatHM(sel.entry.hm)}`, color: '#080', level: 'ok' });
+            html += `</p><p style="color:#080"><small>✓ Friedel's law is not broken in the acentric subgroup ${formatHM(ref.entry.hm)}${res.systematic ? ' (the excess over χ² = 1 is systematic, the control split shows it too)' : ''} —
+              consistent with the selected centrosymmetric ${formatHM(sel.entry.hm)}. An inversion twin only exists in an acentric structure, so no twin fraction is given.</small></p>`;
+          } else {
+            Object.assign(sec, { verdict: 'not determinable — excess is systematic', color: '#888', level: 'none' });
+            html += `</p><p><small>The excess over χ² = 1 is matched by the control split, so it says nothing about an inversion twin — no twin fraction is given.</small></p>`;
+          }
+        } else if (res.twin) {
           const t = res.twin;
           sec.color = t.verdict.startsWith('enantiopure') ? '#080' : t.verdict.startsWith('partial') ? '#b60' : t.verdict.startsWith('racemic') ? '#b00' : '#888';
           sec.verdict = t.verdict.startsWith('enantiopure') ? 'enantiopure' : t.verdict.startsWith('partial') ? 'partial inversion twin' : t.verdict.startsWith('racemic') ? 'racemic twin or centrosymmetric' : 'signal too weak to judge';
           sec.level = t.verdict.startsWith('enantiopure') ? 'ok' : t.verdict.startsWith('partial') || t.verdict.startsWith('racemic') ? 'warn' : 'none';
-          sec.result += ` · x ≈ ${t.x.toFixed(2)} ± ${t.xSe.toFixed(2)}`;
-          html += ` · expected without inversion twinning: χ² ≈ ${t.expectedChi2.toFixed(1)}<br>
-            Inversion-twin fraction: <strong>x ≈ ${t.x.toFixed(2)}</strong> <small>± ${t.xSe.toFixed(2)}</small> — <span style="color:${sec.color}">${t.verdict}</span></p>
-            ${lastTwinCheck && lastTwinCheck.applicable && lastTwinCheck.laws.some(L => L.verdict === 'twinned') ? '<p style="color:#b60"><small>Combined with the twin law above the two effects mix — rough indication only.</small></p>' : ''}`;
-          if (t.x >= 0.1 && t.expectedChi2 >= 1.5) {
-            html += ref === sel
-              ? `<p><label><input type="checkbox" id="invTwinToIns" ${invTwinWriteToIns ? 'checked' : ''}> <span>write the inversion twin (<code>TWIN</code>, <code>BASF ${t.x.toFixed(2)}</code>) to the .ins</span></label></p>`
-              : `<p><small>An inversion twin only exists for an acentric space group — select ${formatHM(ref.entry.hm)} on the Space Group tab to write it to the .ins.</small></p>`;
+          if (t.fromModel) {
+            if (!res.modelExpect.weak) sec.result += ` · x ≈ ${t.x.toFixed(2)}`;
+            html += ` · expected without inversion twinning: χ² ≈ ${t.expectedChi2.toFixed(2)} <small>from the refined model (${t.composedChi2.toFixed(1)} from the composition)</small><br>`
+              + (res.modelExpect.weak
+                ? `<span style="color:${sec.color}">The model expects so little anomalous signal that it cannot be seen without the model</span></p>
+                  <p><small>The composition estimate assumes randomly placed atoms; here the anomalous scatterers are arranged so that their contributions to I(h) − I(−h)
+                  largely cancel (e.g. heavy atoms related by an almost exact inversion centre). χ² ≈ 1 therefore says nothing about racemic twinning —
+                  the refined model below, which compares with Δcalc reflection by reflection, decides.</small></p>`
+                : `Inversion-twin fraction: <strong>x ≈ ${t.x.toFixed(2)}</strong> <small>(observed χ² against the model's expectation)</small> — <span style="color:${sec.color}">${t.verdict}</span></p>`);
+          } else {
+            sec.result += ` · x ≈ ${t.x.toFixed(2)} ± ${t.xSe.toFixed(2)}`;
+            html += ` · expected without inversion twinning: χ² ≈ ${t.expectedChi2.toFixed(1)}<br>
+            Inversion-twin fraction: <strong>x ≈ ${t.x.toFixed(2)}</strong> <small>± ${t.xSe.toFixed(2)}</small> — <span style="color:${sec.color}">${t.verdict}</span></p>`;
           }
+          html += `
+            ${lastTwinCheck && lastTwinCheck.applicable && lastTwinCheck.laws.some(L => L.verdict === 'twinned') ? '<p style="color:#b60"><small>Combined with the twin law above the two effects mix — rough indication only.</small></p>' : ''}`;
         } else {
           const why = !fppInfo.fpp ? `no f″ values — they come from a CIF (<code>_atom_type_scat_dispersion_imag</code>) or, for Ti, Cr, Fe, Co, Cu, Mo, Ag, W, Au and U Kα, from the built-in table (ITA Vol. C 4.2.6.8)${fppInfo.note ? ` (${fppInfo.note})` : ''}`
             : !comp ? 'no composition (formula + Z or a .ins)'
@@ -678,7 +740,16 @@
           html += `</p><p><small>The expected signal cannot be computed (${why}), so a racemic twin cannot be told apart from a structure with only light atoms.
             ${res.acentricEvidence === 'strong' ? 'The clear anomalous signal shows the structure is acentric and not a 50:50 racemic twin.' : ''}</small></p>`;
         }
-        if (res.systematic) {
+        // TWIN/BASF box: whenever there is a usable inversion fraction (from the
+        // refined model when one is loaded, else model-free), in every branch
+        // above — yw44: model-free "systematic", but the model gives x = 0.51
+        const basf = centroOk ? null : invTwinBasf();
+        if (basf !== null) {
+          html += ref === sel
+            ? `<p><label><input type="checkbox" id="invTwinToIns" ${invTwinWriteToIns ? 'checked' : ''}> <span>write the inversion twin (<code>TWIN</code>, <code>BASF ${basf.toFixed(2)}</code>) to the .ins</span>${am ? '&nbsp;<small>(x from the refined model)</small>' : ''}</label></p>`
+            : `<p><small>An inversion twin only exists for an acentric space group — select ${formatHM(ref.entry.hm)} on the Space Group tab to write it to the .ins.</small></p>`;
+        }
+        if (res.systematic && !centroOk) {
           html += `<p style="color:#b60"><small><strong>Excess over χ² = 1 is systematic, not anomalous:</strong> the control split (pairs that are <em>not</em> Bijvoet mates
             in ${formatHM(ref.entry.hm)}) shows the same excess (χ² = ${res.controlChi2.toFixed(2)} vs. ${res.chi2.toFixed(2)}) — typical of residual absorption or scaling errors.
             Friedel's law is <em>not</em> shown to be broken.</small></p>`;
@@ -787,7 +858,9 @@
       if (r1Bad) notes.push(`<small style="color:#b00"><strong>⚠ R1 is far above the CIF value:</strong> model and reflections do not fit together here (different setting, HKLF 5, or a feature not supported) — treat the values above with care.</small>`);
       if (v.level === 'bad') notes.push(`<small style="color:#b00"><strong>Invert the model:</strong> in SHELXL <code>MOVE 1 1 1 -1</code> before the atoms; in a space group with a chiral screw axis (P4₁, P3₁21, P6₁ …) also change to the enantiomorph (P4₃, P3₂21, P6₅ …).</small>`);
       if ((mainX < -3 * main.su || mainX > 1 + 3 * main.su) && main.su <= 0.1) notes.push(`<small>x lies ${mainX < 0 ? 'below 0' : 'above 1'} by more than 3 su — not a twin, but a sign of systematic errors (absorption, scaling) or an su that is too small.</small>`);
-      if (r.inversionTwin) notes.push(`<small>Refined as an inversion twin (TWIN, BASF ${r.basf.length ? r.basf.map(b => b.toFixed(3)).join(', ') : '—'}): x should come out near BASF.</small>`);
+      if (r.twinLaw) notes.push(`<small>Refined with <code>TWIN ${r.twinLaw.matrix.flat().join(' ')}${r.twinLaw.n !== 2 ? ' ' + r.twinLaw.n : ''}</code> (${r.twinLaw.nComponents} components, BASF ${r.basf.map(b => b.toFixed(3)).join(', ')}).
+        The model intensities include the twin law; x is the share of the components with inversion — refined: ${r.twinLaw.xRefined.toFixed(3)}, so x should come out near that.</small>`);
+      else if (r.inversionTwin) notes.push(`<small>Refined as an inversion twin (TWIN, BASF ${r.basf.length ? r.basf.map(b => b.toFixed(3)).join(', ') : '—'}): x should come out near BASF.</small>`);
       if (r.dispersion.missing.length) notes.push(`<small style="color:#b60">No f″ for ${r.dispersion.missing.join(', ')} — taken as 0.</small>`);
       if (r.dispersion.fromTable.length) notes.push(`<small>f″ for ${r.dispersion.fromTable.join(', ')} from ITA Vol. C 4.2.6.8 (not in the CIF), f′ = 0.</small>`);
       if (main.su > 0.1) notes.push(`<small style="color:#b60">Weak anomalous signal (su > 0.1)${r.dispersion.missing.length ? '' : ' — light atoms only'}: Cu Kα, longer exposure or a heavier atom (e.g. a salt) would help.</small>`);
@@ -804,6 +877,14 @@
       return sec;
     }
 
+    // Twin of index 2 found by the non-merohedral check, as {shelxMatrix (halves), alpha}, or null.
+    function idx2TwinLaw() {
+      const L = lastNonMeroCheck && lastNonMeroCheck.applicable ? lastNonMeroCheck.laws.find(x => x.index === 2 && x.verdict.startsWith('twinned')) : null;
+      if (!L) return null;
+      const half = x => { const v = Math.round(2 * x) / 2; return Object.is(v, -0) ? 0 : v; };
+      return { shelxMatrix: L.matrix.map(r => r.map(half)), alpha: L.alpha };
+    }
+
     // Twin instructions for the .ins (ticked boxes, significant results), or null:
     // a twin law with BASF α, the inversion twin with BASF x, or both combined
     // as TWIN R -4 with the three component fractions.
@@ -813,9 +894,10 @@
         const best = lastTwinCheck.laws.filter(L => L.verdict === 'twinned' || L.verdict.startsWith('perfect')).sort((x, y) => y.alpha - x.alpha)[0];
         if (best) law = best;
       }
+      // a twin of index 2 (non-merohedral check) is refined the same way, with HKLF 4
+      if (!law && idx2WriteToIns) { const L = idx2TwinLaw(); if (L) law = L; }
       const selEntry = lastMatchResults && lastMatchResults[selectedCandidateIndex] ? lastMatchResults[selectedCandidateIndex].entry : null;
-      if (invTwinWriteToIns && selEntry && !hallSymbolIsCentrosymmetric(selEntry.hall)
-          && lastAnomalousCheck && lastAnomalousCheck.twin && lastAnomalousCheck.twin.x >= 0.1) inv = lastAnomalousCheck.twin.x;
+      if (invTwinWriteToIns && selEntry && !hallSymbolIsCentrosymmetric(selEntry.hall) && invTwinBasf() !== null) inv = invTwinBasf();
       const minus1 = [[-1, 0, 0], [0, -1, 0], [0, 0, -1]];
       if (law && inv !== null) {
         const a = law.alpha, x = inv; // components: R (a(1-x)), -1 (x(1-a)), R·-1 (a·x)
@@ -1860,10 +1942,16 @@
       // Twinning found on tab 3 but not (all) written to this .ins
       const findings = twinFindings() || [];
       const written = twinForIns();
-      const nonMero = findings.filter(x => x.kind === 'nonmero');
-      const nonMeroInsNote = nonMero.length
+      // index 1 needs HKLF 5; index 2 is refined with TWIN in HKLF 4 (ticked on tab 3, or not yet)
+      const idx2 = idx2TwinLaw();
+      const idx2Written = idx2 && written && written.matrix.flat().join(' ') === idx2.shelxMatrix.flat().join(' ');
+      const nonMero = findings.filter(x => x.kind === 'nonmero' && !x.text.startsWith('twin of index 2'));
+      const nonMeroIdx2 = findings.filter(x => x.kind === 'nonmero' && x.text.startsWith('twin of index 2') && !idx2Written);
+      const nonMeroInsNote = (nonMero.length
         ? `<p style="color:#b60"><strong>⚠ ${nonMero.map(x => x.text).join(' · ')}</strong> — this .ins (HKLF 4) cannot handle it; refine against an HKLF 5 file (PLATON TwinRotMat or TWINABS). See <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">tab 3</a>.</p>`
-        : '';
+        : '') + (nonMeroIdx2.length
+        ? `<p style="color:#b60"><strong>⚠ Twinning found but not in this .ins:</strong> ${nonMeroIdx2.map(x => x.text).join(' · ')} — refined with TWIN in HKLF 4; tick it on <a onclick="window.switchTab('tab-twin')" style="cursor:pointer">tab 3</a> to add TWIN/BASF.</p>`
+        : '');
       const notWritten = findings.filter(x => x.kind !== 'nonmero').filter(x => x.kind === 'law' ? !(written && written.matrix.flat().join(' ') !== '-1 0 0 0 -1 0 0 0 -1')
         : !(written && (written.n === -4 || written.matrix.flat().join(' ') === '-1 0 0 0 -1 0 0 0 -1'))).filter(x => x.kind === 'law' || !hallSymbolIsCentrosymmetric(top.hall));
       const twinInsNote = notWritten.length

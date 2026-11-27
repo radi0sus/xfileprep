@@ -10,9 +10,9 @@ Runs entirely client-side: open `index.html` in a browser. No server, no build s
 2. **Laue Symmetry** — R<sub>int</sub> for each Laue class the metric allows. Intensity-weighted reciprocal-lattice planes and a layer viewer (hk*L*, h*K*l, *H*kl) that marks gaps in the data, optionally completed from symmetry equivalents. Merging statistics per resolution shell: completeness, redundancy, ⟨I/σ⟩, CC½, R<sub>int</sub>, R<sub>meas</sub>, R<sub>pim</sub>.
 3. **Twins & Abs. Structure** — Its own tab, because twinning and an inverted model are easy to miss; findings are flagged on every tab. An overview table gives one line per check; the details sit in collapsible sections that open by themselves when something is wrong.
    - Lattice symmetry beyond the Laue class (Le Page search for 2-fold axes, independent of the cell choice) and the resulting (pseudo-)merohedral twin laws, tested with the H test, with an estimated twin fraction and an N(H) plot.
-   - Non-merohedral twins: lattice 2-folds with 1–6° obliquity, tested on the overlapping reflections only.
+   - Non-merohedral twins: lattice 2-folds with 1–6° obliquity, tested on the overlapping reflections only. Also 2-folds of twin index 2 (matrix with halves, e.g. l′ = l + h/2 in a monoclinic cell with a long axis), which overlap exactly for every second reflection; these can be refined with TWIN in HKLF 4 mode, and the app gives the TWIN line. The overlap tolerance scales with the shortest reciprocal axis.
    - Inversion (racemic) twinning from the Bijvoet differences, compared with the anomalous signal expected from the composition — a model-free, sign-less analogue of the Flack parameter.
-   - Absolute structure from a final CIF (refined model in `_shelx_res_file`, unmerged data in `_shelx_hkl_file`): Parsons quotients, Hooft y (with P2/P3) and a classical Flack x with the model held fixed, next to the value SHELXL wrote into the CIF. Supports LATT/SYMM, short and long SFAC, DISP, free variables, riding H, anisotropic U, EXTI, HKLF 4 matrices, OMIT/SHEL and inversion twins; not other twin laws, HKLF 5 or SWAT.
+   - Absolute structure from a final CIF (refined model in `_shelx_res_file`, unmerged data in `_shelx_hkl_file`): Parsons quotients, Hooft y (with P2/P3) and a classical Flack x with the model held fixed, next to the value SHELXL wrote into the CIF. Supports LATT/SYMM, short and long SFAC, DISP, free variables, riding H, anisotropic U, EXTI, HKLF 4 matrices, OMIT/SHEL and merohedral twins (TWIN with BASF, also combined with inversion as in TWIN … -4: the model intensities include the twin law and x is the inversion share); not HKLF 5 or SWAT.
    - Merohedral and inversion twin laws can be written to the `.ins` as `TWIN`/`BASF` (opt-in).
 4. **Absences** — Lattice centring, screw axes and glide planes (including *d*-glides and diagonal planes), with zone plots and axial strips. Conditions that no space group of the Laue class can have are flagged as pseudo-symmetry. A table of **pseudo-translations** (reflection classes that are weak but present) warns of pseudo-centring and sub-cells.
 5. **E² Statistics** — Wilson plot, ⟨|E²−1|⟩ overall and per resolution shell, N(z) test. Needs a composition.
@@ -34,7 +34,7 @@ Runs entirely client-side: open `index.html` in a browser. No server, no build s
 
 ## Limitations
 
-- HKLF 5 reflection files are not supported as input yet; the app cannot write them either. A non-merohedral twin is reported, but needs an HKLF 5 file from elsewhere (e.g. PLATON, TWINABS).
+- HKLF 5 reflection files are not supported as input yet; the app cannot write them either. A non-merohedral twin (index 1) is reported, but needs an HKLF 5 file from elsewhere (e.g. PLATON, TWINABS).
 - No hexagonal ↔ rhombohedral axes transformation.
 - The space-group diagram covers triclinic, monoclinic and orthorhombic groups only.
 - Absences cannot distinguish centrosymmetric from acentric groups with the same conditions, nor enantiomorphic pairs (*P*4₁ / *P*4₃); E² and the refinement have to decide.

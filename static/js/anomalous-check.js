@@ -10,9 +10,13 @@
 // 1. Observed signal: chi2 = <(I+ - I-)^2 / (s+^2 + s-^2)>, 1 for noise only
 //    (sigmas first rescaled by the scatter of repeated measurements, see below).
 //    A clearly significant excess means Friedel's law is broken — which no
-//    centrosymmetric structure can do (yw6: E² says "centrosymmetric",
-//    Bijvoet chi2 = 17 says acentric; refined in P 21). Absorption errors can
-//    fake a small excess, hence the generous threshold.
+//    centrosymmetric structure can do. Absorption errors can fake a small
+//    excess, hence the generous threshold. Without the σ calibration a raw
+//    excess means little: yw6 (P 21, twin 2[001] + inversion) gives chi2 = 17
+//    with the σ of its .hkl, but these are 3.9× smaller than the scatter of
+//    its repeated measurements (variance ×15.4); calibrated, chi2 = 1.07 —
+//    as expected for an inversion share of 0.45, which leaves (1 − 2x)² = 1 %
+//    of the anomalous signal.
 //    Control: absorption / scaling residuals do not care which half of the
 //    Laue group is "the" point group. The same chi2 is therefore also computed
 //    for the OTHER acentric index-2 subgroups of the Laue class (2/m: m <-> 2;
@@ -29,8 +33,14 @@
 //    fraction x — no sign, there is no structure model to tell the hand.
 //    Checked: jg6 (Cu, Flack -0.006) -> 0.02, nm75_26 (Co, Flack 0.45) ->
 //    0.40, COD 1501632 (Sr/Cu, Flack 0.52) -> 0.48. Combined with a
-//    (pseudo-)merohedral twin the two effects mix (yw6: 0.27 vs. a refined
-//    inversion share of 0.45) — then it is only a rough indication.
+//    (pseudo-)merohedral twin the two effects mix (yw6: 0.50 ± 0.05 vs. a
+//    refined inversion share of 0.45) — then it is only a rough indication.
+//    The random-atom estimate fails when the anomalous scatterers are arranged
+//    (pseudo-)centrosymmetrically: jm7_26 (Pca21, 2 I in the asymmetric unit,
+//    all I within 0.32 Å of a pseudo-inversion centre, refined x = 0.27):
+//    expected chi2 3.7 from the composition, 1.24 from the refined model, observed
+//    1.00. With a refined model loaded, app.js therefore takes the expected chi2
+//    from Δcalc (abs-structure.js, expectedChi2) instead.
 
 // f'' per element from the CIF atom-type loop, or null.
 function extractDispersionFromCIF(text) {
