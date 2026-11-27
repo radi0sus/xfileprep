@@ -711,6 +711,17 @@ const REPORT_JS = `
   window.addEventListener('afterprint', function () { ds.forEach(function (d) { d.open = false; }); ds = []; });
   var lb = document.getElementById('lightbox');
   document.addEventListener('click', function (e) {
+    // in-page links (→ details, contents, ↑ top): in the srcdoc preview "#id"
+    // resolves against the APP's URL and would load the app into the frame
+    var a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (a) {
+      e.preventDefault();
+      var id = a.getAttribute('href').slice(1);
+      var t = id ? document.getElementById(id) : null;
+      if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     var img = e.target.closest && e.target.closest('.plots img');
     if (img) {
       lb.querySelector('img').src = img.src;

@@ -651,7 +651,7 @@
           ? (res.sigmaScale > 1.05 ? `σ scaled ×${Math.sqrt(res.sigmaScale).toFixed(2)} to match repeated measurements` : 'σ consistent with repeated measurements')
           : 'σ not calibrated (merged data)';
         let html = `<p>${res.pairs} Bijvoet pairs <small>(${pgNote}; ${sigmaNote})</small><br>
-          Observed anomalous signal: χ² = <strong>${res.chi2.toFixed(2)}</strong> <small>(1 = noise only)</small>`;
+          Observed anomalous signal: χ² = <strong>${res.chi2.toFixed(2)}</strong> <small>(1 = noise only${res.controlChi2 !== null ? `; control, other acentric half of the Laue group: χ² = ${res.controlChi2.toFixed(2)}` : '; no control split for this Laue class'})</small>`;
         sec.result = `χ² = ${res.chi2.toFixed(2)}`;
         if (res.twin) {
           const t = res.twin;
@@ -676,6 +676,11 @@
           html += `</p><p><small>The expected signal cannot be computed (${why}), so a racemic twin cannot be told apart from a structure with only light atoms.
             ${res.acentricEvidence === 'strong' ? 'The clear anomalous signal shows the structure is acentric and not a 50:50 racemic twin.' : ''}</small></p>`;
         }
+        if (res.systematic) {
+          html += `<p style="color:#b60"><small><strong>Excess over χ² = 1 is systematic, not anomalous:</strong> the control split (pairs that are <em>not</em> Bijvoet mates
+            in ${formatHM(ref.entry.hm)}) shows the same excess (χ² = ${res.controlChi2.toFixed(2)} vs. ${res.chi2.toFixed(2)}) — typical of residual absorption or scaling errors.
+            Friedel's law is <em>not</em> shown to be broken.</small></p>`;
+        }
         if (res.acentricEvidence === 'strong' && hallSymbolIsCentrosymmetric(sel.entry.hall)) {
           Object.assign(sec, { verdict: `Friedel's law broken — ${formatHM(sel.entry.hm)} probably wrong`, color: '#b00', level: 'bad' });
           html += `<p style="color:#b00"><strong>⚠ Friedel's law is clearly broken (χ² = ${res.chi2.toFixed(1)}), which no centrosymmetric structure can do — the selected ${formatHM(sel.entry.hm)} is probably wrong;
@@ -692,7 +697,8 @@
         html += absNote;
         html += howToRead(`Compares the Bijvoet differences I(h) − I(−h) with the anomalous signal expected from the composition (f″ ${fppInfo.source || '—'}${comp ? `, composition ${comp.source}` : ''}).
           The ratio observed/expected ≈ |1 − 2x|. Like the Flack parameter, but without a model and therefore without sign: x and 1 − x look the same, and a 50:50
-          racemic twin cannot be told apart from a centrosymmetric structure. A clear excess over χ² = 1 means the structure is acentric, whatever the E² statistics
+          racemic twin cannot be told apart from a centrosymmetric structure. As a control, the same χ² is computed for the other acentric halves of the Laue group
+          (e.g. 2 instead of m): there the Bijvoet mates cancel, so only absorption/scaling errors remain. A clear excess over χ² = 1 <em>and</em> over the control means the structure is acentric, whatever the E² statistics
           (tab 5) say — a useful cross-check when twinning or a heavy atom makes E² look centrosymmetric. Refine the Flack parameter (or BASF) to get the real value.`);
         sec.body = html;
       } catch (err) {
