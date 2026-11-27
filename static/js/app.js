@@ -484,6 +484,8 @@
       reportState.twinSections = sections;
       el.innerHTML = twinOverviewHtml(sections) + sections.map(twinSectionHtml).join('');
       bindTwinSections(el);
+      const bzHost = document.getElementById('bijvoetZoneHost');
+      if (bzHost) initBijvoetZones(bzHost, cell, lastAnomalousCheck);
       const nhEl = document.getElementById('nhPlotContainer');
       if (nhEl && lastTwinCheck && lastTwinCheck.applicable) renderNHPlot(nhEl, lastTwinCheck.laws);
       const cb = document.getElementById('twinToIns');
@@ -695,11 +697,16 @@
           sec.verdict += ' <small>(refined model below decides)</small>';
         }
         html += absNote;
+        html += '<div id="bijvoetZoneHost"></div>';
         html += howToRead(`Compares the Bijvoet differences I(h) − I(−h) with the anomalous signal expected from the composition (f″ ${fppInfo.source || '—'}${comp ? `, composition ${comp.source}` : ''}).
           The ratio observed/expected ≈ |1 − 2x|. Like the Flack parameter, but without a model and therefore without sign: x and 1 − x look the same, and a 50:50
           racemic twin cannot be told apart from a centrosymmetric structure. As a control, the same χ² is computed for the other acentric halves of the Laue group
           (e.g. 2 instead of m): there the Bijvoet mates cancel, so only absorption/scaling errors remain. A clear excess over χ² = 1 <em>and</em> over the control means the structure is acentric, whatever the E² statistics
-          (tab 5) say — a useful cross-check when twinning or a heavy atom makes E² look centrosymmetric. Refine the Flack parameter (or BASF) to get the real value.`);
+          (tab 5) say — a useful cross-check when twinning or a heavy atom makes E² look centrosymmetric. Refine the Flack parameter (or BASF) to get the real value.
+          <br><strong>Zone plot:</strong> one reciprocal-lattice layer like the Laue layer viewer, circle area ∝ |I(h) − I(−h)|/σ (full size at 8σ), filled where
+          I(h) &gt; I(−h), open where I(h) &lt; I(−h), grey dots below the chosen threshold (3σ by default, so that the noise pairs of a centrosymmetric
+          structure stay dots). Each pair appears at h and, with the opposite sign, at −h; it is drawn at all symmetry equivalents. As in the Laue viewer, indices present in the data are blue, positions filled in from an equivalent orange; the status line counts pairs, not positions. In centric layers (e.g. h0l in
+          P2₁, all of hk0/h0l/0kl in P2₁2₁2₁) −h is equivalent to h, so there are no Bijvoet pairs; the plot starts at the nearest layer that has some.`);
         sec.body = html;
       } catch (err) {
         Object.assign(sec, { verdict: 'check failed', color: '#b00', body: `<p style="color:#b00"><small>Could not run the Bijvoet check: ${err.message}</small></p>` });

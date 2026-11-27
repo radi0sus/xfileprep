@@ -173,7 +173,7 @@ function checkAnomalousSignal(reflections, cell, pointGroup, fpp, composition) {
     const e2 = merged.get(key2);
     if (!e2) continue;
     const d = e.I - e2.I, v = e.v + e2.v, Ib = (e.I + e2.I) / 2;
-    const p = { d, v, Ib, dexp2: null };
+    const p = { h, d, v, Ib, dexp2: null };
     if (sumFpp2 > 0 && Ib > 0) {
       const s = sinThetaOverLambda(h[0], h[1], h[2], recip);
       const sumF02 = usable.reduce((a, c) => a + c.count * (scatteringFactor(c.element, s) || 0) ** 2, 0);
@@ -231,5 +231,8 @@ function checkAnomalousSignal(reflections, cell, pointGroup, fpp, composition) {
     else verdict = 'racemic (inversion) twin near 50:50 — or centrosymmetric';
     twin = { ratio, ratioSe, x, xSe: ratioSe / 2, expectedChi2, verdict };
   }
-  return { pairs: n, enough: true, chi2, z, acentricEvidence, controlChi2, nControls: controls.length, systematic, twin, missingFpp, hasFpp: sumFpp2 > 0, sigmaScale, calibrated };
+  // per pair z = (I(h) − I(−h))/σ, for the zone plot (bijvoet-zones.js)
+  const bijvoetPairs = pairs.map(p => ({ h: p.h, z: p.d / Math.sqrt(p.v) }));
+  const measured = new Set(reflections.map(r => `${r.h},${r.k},${r.l}`));
+  return { pairs: n, enough: true, chi2, z, acentricEvidence, controlChi2, nControls: controls.length, systematic, twin, missingFpp, hasFpp: sumFpp2 > 0, sigmaScale, calibrated, pointGroup, bijvoetPairs, measured };
 }
