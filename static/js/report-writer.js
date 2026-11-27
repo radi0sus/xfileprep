@@ -472,7 +472,10 @@ function reportCollect(opts) {
     if (opts.zonePlots && cell) {
       absBlocks.push({ t: 'plots', items: Object.keys(ZONE_PLOT_CONFIG).map(z =>
         rptPlot(`${z} (${ZONE_PLOT_CONFIG[z].fixed})`, (cv, zoom) => renderZonePlot(cv, lastReflections, z, scan, cell, zoom, 300))).filter(Boolean), small: true });
-      absBlocks.push({ t: 'p', small: true, html: 'Zone plots: green = significant reflection, grey = measured but weak (I/σ < 3), blank = not measured.' });
+      // the axial strips of tab 4 (h00, 0k0, 00l), same colours
+      absBlocks.push({ t: 'plots', items: Object.keys(AXIAL_PLOT_CONFIG).map(ax =>
+        rptPlot(ax, (cv, zoom) => renderAxialStrip(cv, lastReflections, ax, scan, zoom))).filter(Boolean), small: true });
+      absBlocks.push({ t: 'p', small: true, html: 'Zone plots and axial rows (h00, 0k0, 00l): green = significant reflection, grey = measured but weak (I/σ < 3), blank = not measured.' });
     }
   } else absBlocks.push({ t: 'p', html: 'Not run (needs reflections).' });
   sections.push({ id: 'sec-abs', title: 'Systematic absences', blocks: absBlocks });
