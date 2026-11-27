@@ -2,8 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>XFilePrep — HKL/CIF Parser</title>
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14161b" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-title" content="XFilePrep">
+<link rel="icon" href="static/icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="static/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="static/css/style.css">
 </head>
 <body>
@@ -29,8 +34,10 @@
 
   <div id="tab-file" class="tabPanel active">
     <div id="dropZone">
-      Drop file(s) here — anywhere in the window — (.hkl, .cif, .ins, .p4p)<br>
-      <small>or</small><br>
+      <span class="dropHint">Drop file(s) here — anywhere in the window — (.hkl, .cif, .ins, .p4p)<br>
+      <small>or</small><br></span>
+      <span class="tapHint">Open .hkl, .cif, .ins or .p4p files (several at once are fine)<br></span>
+      <label class="fileBtn" for="hklInput">Choose files…</label>
       <input type="file" id="hklInput" multiple>
     </div>
     <details class="explain"><summary>Tip: loading several files</summary><p><small>Tip: for a reflection file plus a separate cell-info file (e.g. .hkl + .ins, or .hkl + .p4p), drop them in either order —
@@ -125,9 +132,10 @@
         Optional marks (off by default): <span class="reflMarkOutlier">◎ outliers</span> — an observation that disagrees with the other observations of its symmetry class
         (|I − ⟨I⟩| / σ above the chosen threshold; needs unmerged data), typical for a spot of a second domain on top of a reflection, the beamstop, a detector edge or a bad frame;
         <span class="reflMarkForbidden">✕ forbidden but observed</span> — systematically absent under the observed lattice and the absence conditions that held, yet I/σ ≥ 3.
-        Hover over a reflection for its intensity, its symmetry class and batches; click to pin that information. ⤢ enlarges the picture together with the controls.<br>
+        Hover over a reflection for its intensity, its symmetry class and batches; click to pin that information.
+        On a tablet: tap a reflection (its information appears at the bottom of the screen) and swipe sideways over the picture to change the layer. ⤢ enlarges the picture together with the controls.<br>
         The 3D view on the right shows the whole reciprocal lattice inside the resolution sphere, with the current layer as a plane through it and the same marks.
-        Drag to rotate, wheel or pinch to zoom, double-click to reset; ⤢ enlarges it together with its controls.</small></p></details>
+        Drag to rotate, wheel or pinch to zoom, double-click (on a tablet: double-tap) to reset; ⤢ enlarges it together with its controls.</small></p></details>
       <div id="layerViewerContainer"></div>
 
       <h2>Resolution shells (merging statistics)</h2>
@@ -207,6 +215,7 @@
     <iframe id="reportPreview" class="reportPreview" title="Report preview"></iframe>
   </div>
 
+  <script src="static/js/touch.js"></script>
   <script src="static/js/tabs.js"></script>
   <script src="static/js/plot-theme.js"></script>
   <script src="static/js/plot-zoom.js"></script>

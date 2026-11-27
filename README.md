@@ -20,6 +20,15 @@ Runs entirely client-side: open `index.html` in a browser. No server, no build s
 7. **SHELX .ins and .hkl** — A ready-to-use `.ins` for the selected candidate. If that candidate needs another setting than the measured one, the cell is transformed and the matrix written on the `HKLF` line; the `.hkl` itself stays untouched. Reflections from a CIF can be saved as a SHELX `.hkl`.
 8. **Report** — Everything the other tabs found in one document, with a live preview. It lists the input files (size, date, SHA-256), the result with the source of every decision (automatic, by hand, from a file, assumed or estimated), a list of points to check (twins, ties, unresolved candidates, pseudo-translations, an E² verdict that contradicts the selected group, low completeness, strong absorption, an assumed wavelength or estimated Z …), and the details of every step with the plots, the zone plots and the space-group diagram (each can be switched off). Saved as a self-contained `.html` (prints cleanly to PDF from the browser; plots enlarge on click, collapsed parts open for printing) or as a plain-ASCII text listing (`…_report.txt`) in the spirit of XPREP's .prp file. A free-text field for sample, operator and remarks goes into the header.
 
+## Tablet
+
+The same page works on a tablet; there is no separate version and no switch.
+
+- **Layout** follows the device: when the primary pointer is a finger (`pointer: coarse`, e.g. an iPad without trackpad), controls, tabs and fields are finger-sized, the tab bar stays at the top and scrolls sideways, wide tables scroll in their own box, and files are opened with a *Choose files…* button.
+- **Behaviour** follows each input: a tap on a reflection, a space-group-diagram symbol or a dotted-underlined term shows its information in a bar at the bottom of the screen instead of a hover tooltip; switches with an explanation get an ⓘ. Swipe sideways over the layer viewer or the Bijvoet zones to change the layer; double-tap the 3D view to reset it. With a mouse or trackpad (also on an iPad) the hover tooltips work as on the desktop.
+
+Safari on iPad cannot run `index.html` straight from the Files app; open it from a web address (e.g. GitHub Pages). *Add to Home Screen* in Safari gives it an icon.
+
 ## Methods
 
 - **Symmetry** is derived at runtime from Hall symbols and their operators (all 530 settings of International Tables Vol. B), not hard-coded per space group. Reflection conditions follow from the operators.

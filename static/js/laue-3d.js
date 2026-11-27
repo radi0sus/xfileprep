@@ -507,7 +507,7 @@ function l3dPick(clientX, clientY) {
     const sy = half - pxW * (R[1][0] * x + R[1][1] * y + R[1][2] * z);
     const d = Math.hypot(sx - mx, sy - my);
     const rad = arr[i + 6] * pxW * (on ? 1 : _l3d.size);
-    if (d > Math.max(rad + 2, 6)) continue;
+    if (d > Math.max(rad + 2, typeof touchSlop === 'function' ? touchSlop(6) : 6)) continue;
     const depth = R[2][0] * x + R[2][1] * y + R[2][2] * z;
     const score = (on ? 1e6 : 0) - d + 0.5 * depth / _l3d.R; // nearest on screen; depth only breaks ties
     if (!best || score > best.score) best = { score, h: arr[i + 3], k: arr[i + 4], l: arr[i + 5], kind };
@@ -525,7 +525,7 @@ function l3dTipAt(e, pin) {
 
 function l3dAttachPointer(el) {
   const ptrs = new Map();
-  let pinch = null, start = null, hoverFrame = 0, lastMove = null;
+  let pinch = null, start = null, hoverFrame = 0, lastMove = null, lastTap = null;
   el.addEventListener('pointerdown', e => {
     if (ptrs.size === 0) start = { x: e.clientX, y: e.clientY, moved: false };
     hideReflectionTip(false);
@@ -555,7 +555,16 @@ function l3dAttachPointer(el) {
   el.addEventListener('pointerup', e => {
     const click = ptrs.size === 1 && start && !start.moved;
     up(e);
-    if (click) l3dTipAt(e, true); // a click (or tap) without dragging pins the info
+    if (!click) return;
+    // double tap with a finger = reset (dblclick does not reach a page on iPad)
+    if (e.pointerType !== 'mouse') {
+      const now = Date.now();
+      if (lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
+        lastTap = null; _l3d.rot = l3dViewOblique(); _l3d.zoom = 1; l3dRequest(); return;
+      }
+      lastTap = { t: now, x: e.clientX, y: e.clientY };
+    }
+    l3dTipAt(e, true); // a click (or tap) without dragging pins the info
   });
   el.addEventListener('pointercancel', up);
   el.addEventListener('pointerleave', () => { lastMove = null; hideReflectionTip(false); });
@@ -621,7 +630,7 @@ function initLaue3d(host, ctx) {
         ${chk('l3dSphere', 'sphere', 'sphere')}
         ${L3D_PLANE_ZONES.map(z => chk('l3dPlane_' + z.axis, z.axis, `<span style="color:${L3D_AXIS_COLORS[z.axis]}">■</span> ${z.name}`, `zone plane ${z.name} through the origin`)).join('')}
       </div>
-      <p class="laue3dHint"><small>Drag to rotate · wheel or pinch to zoom · double-click to reset.</small></p>
+      <p class="laue3dHint"><small>Drag to rotate · wheel or pinch to zoom · double-click (double-tap) to reset.</small></p>
     </div>`;
   const wrap = host.querySelector('.laue3dWrap');
   wrap.appendChild(_l3d.canvas);

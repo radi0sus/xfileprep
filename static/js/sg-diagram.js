@@ -802,6 +802,6 @@ function renderSpaceGroupDiagram(container, entry, cell) {
         </div>
       </div>
       <p class="sgdNote"><small>Projection along ${names[view]}; ${names[V]} up, ${names[H]} to the right. Schematic cell${ang !== 90 ? ` (${angleNames[view]} drawn as ${ang}°${realAng ? `, here ${realAng.toFixed(2)}°` : ''})` : ''};
-        symmetry elements in the symbols of International Tables Vol. A, general positions in red (height along ${names[view]}; comma = mirror image). Hover a symbol or circle for details. Derived from the operators of ${entry.hall}.</small></p>
+        symmetry elements in the symbols of International Tables Vol. A, general positions in red (height along ${names[view]}; comma = mirror image). Hover (on a tablet: tap) a symbol or circle for details. Derived from the operators of ${entry.hall}.</small></p>
     </div>`;
 }

@@ -134,6 +134,8 @@ function reflectionInfoHtml(ctx, item, marks) {
 }
 
 function showReflectionTip(html, clientX, clientY, pin) {
+  // finger / pen (touch.js): into the info bar at the bottom, where the hand doesn't cover it
+  if (typeof touchInput === 'function' && touchInput()) { hideReflectionTip(true); showInfoBar(html, 'refl'); return; }
   if (_reflTip.pinned && !pin) return;
   if (!_reflTip.el) {
     _reflTip.el = document.createElement('div');

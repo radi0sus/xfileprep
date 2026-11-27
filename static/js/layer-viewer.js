@@ -231,18 +231,20 @@ function layerHitAt(canvas, clientX, clientY) {
   if (!b.width) return null;
   const sc = 420 / b.width; // drawing coordinates are CSS pixels of a 420-wide plot
   const x = (clientX - b.left) * sc, y = (clientY - b.top) * sc;
+  const slop = typeof touchInput === 'function' && touchInput() ? touchSlop(6) * sc : 6; // a finger: ~22 screen px, nearest point wins
   let best = null, bestD = Infinity;
   for (const p of _layer.hit) {
     const d = Math.hypot(p.x - x, p.y - y);
-    if (d <= Math.max(p.r + 2, 6) && d < bestD) { best = p; bestD = d; }
+    if (d <= Math.max(p.r + 2, slop) && d < bestD) { best = p; bestD = d; }
   }
   if (!best) return null;
   const [h, k, l] = LAYER_AXES[_layer.axis].hkl(best.u, best.v, _layer.n);
   return { h, k, l, kind: best.kind };
 }
 
-function attachLayerHover(canvas) {
+function attachLayerHover(canvas, wasSwipe) {
   canvas.addEventListener('mousemove', e => {
+    if (typeof touchInput === 'function' && touchInput()) return; // emulated mouse events after a tap
     const it = layerHitAt(canvas, e.clientX, e.clientY);
     if (it) showReflectionTip(reflectionInfoHtml(_layer.ctx, it, currentLayerMarks()), e.clientX, e.clientY, false);
     else hideReflectionTip(false);
@@ -250,8 +252,9 @@ function attachLayerHover(canvas) {
   });
   canvas.addEventListener('mouseleave', () => hideReflectionTip(false));
   canvas.addEventListener('click', e => {
+    if (wasSwipe && wasSwipe()) return;
     const it = layerHitAt(canvas, e.clientX, e.clientY);
-    if (!it) return;
+    if (!it) { if (typeof touchInput === 'function' && touchInput()) hideInfoBar('refl'); return; }
     showReflectionTip(reflectionInfoHtml(_layer.ctx, it, currentLayerMarks()), e.clientX, e.clientY, true);
   });
 }
@@ -337,7 +340,9 @@ function initLayerViewer(container, ctx) {
     q('layerOutlLabel').title = 'needs unmerged data (several observations per symmetry class); this file has one per class';
     q('layerOutlLabel').classList.add('disabled');
   }
-  attachLayerHover(_layer.canvas);
+  const wasSwipe = typeof attachSwipeStep === 'function'
+    ? attachSwipeStep(_layer.canvas, d => { stopLayerPlay(); step(d); hideInfoBar('refl'); }) : null;
+  attachLayerHover(_layer.canvas, wasSwipe);
   q('layerExpand').addEventListener('click', () => (viewModalIsOpen() ? closeViewModal() : openLayerModal(container)));
   if (typeof initLaue3d === 'function') initLaue3d(q('layer3dHost'), ctx); // laue-3d.js (optional)
   refreshLayer();

@@ -588,3 +588,119 @@ progress.absProgressBar { width: 100%; max-width: 420px; height: 6px; accent-col
 .reportActions button:disabled { opacity: 0.5; cursor: default; }
 .reportPreview { width: 100%; height: 75vh; min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #e9ebef; }
 @media (max-width: 640px) { .reportControls { grid-template-columns: 1fr; } }
+
+/* ======================================================================
+   Tablet / touch (touch.js). <html class="touch"> = the primary pointer is a
+   finger. Behaviour (tap instead of hover) is decided per input in JS; this
+   block only makes things big enough for a finger and the layout fit.
+   ====================================================================== */
+
+/* bottom info bar: tooltips, reflection info and diagram symbols on touch */
+.infoBar {
+  position: fixed; z-index: 1200; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  transform: translate(-50%, 140%); width: min(680px, calc(100vw - 24px));
+  display: flex; align-items: flex-start; gap: 0.6rem;
+  padding: 0.7rem 0.6rem 0.7rem 1rem; font-size: 0.95rem; line-height: 1.45;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+  transition: transform 0.18s ease; pointer-events: none;
+}
+.infoBar.open { transform: translate(-50%, 0); pointer-events: auto; }
+.infoBarText { flex: 1 1 auto; min-width: 0; max-height: 38vh; overflow-y: auto; overflow-wrap: anywhere; }
+.infoBarClose {
+  flex: 0 0 auto; width: 40px; height: 40px; margin: -0.35rem 0; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-muted); font-size: 1.6rem; line-height: 1; cursor: pointer;
+}
+.infoBarClose:active { background: var(--surface-alt); }
+@media (prefers-reduced-motion: reduce) { .infoBar { transition: none; } }
+body.infoBarOpen { padding-bottom: 12rem; } /* the end of the page can still be scrolled above the bar */
+
+/* selection in the space-group diagram (tap), same look as hover */
+.sgDiagram .sgdPosGroup.sgdSel .sgdPos { stroke-width: 2.8; }
+.sgDiagram .sgdEl.sgdSel .sgdPlane, .sgDiagram .sgdEl.sgdSel .sgdAxisArrow, .sgDiagram .sgdEl.sgdSel .sgdCorner,
+.sgDiagram .sgdEl.sgdSel .sgdQuadOpen, .sgDiagram .sgdEl.sgdSel .sgdTail, .sgDiagram .sgdEl.sgdSel .sgdHook,
+.sgDiagram .sgdEl.sgdSel .sgdInv, .sgDiagram .sgdEl.sgdSel .sgdCornerArrow { stroke: var(--accent); }
+.sgDiagram .sgdEl.sgdSel .sgdLens, .sgDiagram .sgdEl.sgdSel .sgdArrowHead, .sgDiagram .sgdEl.sgdSel .sgdQuad { fill: var(--accent); stroke: var(--accent); }
+.sgdList li.sgdSel { background: var(--accent-soft); border-radius: 4px; }
+
+/* file picker: native input on desktop, a big button on a tablet */
+.fileBtn, .tapHint { display: none; }
+
+html.touch body { padding: calc(1.2rem + env(safe-area-inset-top, 0px)) calc(1rem + env(safe-area-inset-right, 0px)) 5rem calc(1rem + env(safe-area-inset-left, 0px)); }
+html.touch .page { max-width: 1240px; }
+html.touch .appHeader { margin-bottom: 1rem; }
+
+/* tab bar: one row that scrolls sideways, stays at the top while scrolling */
+html.touch .tabBar {
+  position: sticky; top: 0; z-index: 50; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; margin-bottom: 1rem; box-shadow: var(--shadow);
+}
+html.touch .tabBar::-webkit-scrollbar { display: none; }
+html.touch .tabBtn { flex: 0 0 auto; min-height: 46px; padding: 0.55rem 1rem; font-size: 0.95rem; }
+html.touch .tabBtn:hover:not(.active) { background: transparent; border-color: var(--border); color: var(--text-muted); }
+
+/* finger-sized controls; 16px text in fields keeps iOS from zooming in on focus */
+html.touch input[type="number"], html.touch input[type="text"], html.touch select, html.touch textarea { font-size: 16px; }
+html.touch #cellSection input, html.touch #cellSection select { min-height: 44px; padding: 0.45rem 0.6rem; font-size: 16px; }
+html.touch #cellSection input { width: 7.5rem; }
+html.touch #cellSection #zInput, html.touch #cellSection .crystalSize input { width: 5.5rem; }
+html.touch select { min-height: 44px; padding: 0.3rem 0.5rem; border-radius: var(--radius-sm); }
+html.touch button { min-height: 44px; }
+html.touch #determineLaueBtn, html.touch #scanAbsencesBtn, html.touch #matchSpaceGroupBtn, html.touch #computeEStatBtn,
+html.touch #generateInsBtn, html.touch #applyFormulaBtn, html.touch #insCopyBtn, html.touch #insSaveBtn, html.touch #hklSaveBtn,
+html.touch .reportActions button { padding: 0.7rem 1.2rem; font-size: 1rem; }
+html.touch #layerPrev, html.touch #layerNext, html.touch .bzPrev, html.touch .bzNext { min-width: 52px; font-size: 1.1rem; }
+html.touch #layerPlay { min-width: 6.5em; }
+html.touch input[type="range"] { height: 36px; }
+html.touch #layerSlider, html.touch .bzSlider { width: min(320px, 38vw); }
+html.touch .viewExpand { width: 44px; height: 44px; font-size: 1.25rem; }
+html.touch .viewHead { height: 46px; }
+html.touch .laue3dSide { padding-top: calc(46px + 0.3rem); }
+html.touch .plotZoomClose { min-width: 48px; min-height: 48px; font-size: 1.9rem; }
+html.touch input[type="checkbox"] { font-size: 1.2rem; }
+html.touch label:has(> input[type="checkbox"]) { min-height: 44px; }
+html.touch .reportOpts label { min-height: 40px; }
+html.touch details > summary { padding: 0.45rem 0; }
+html.touch details.twinSec > summary { padding: 0.8rem 0.9rem; }
+html.touch td, html.touch th { padding: 0.55rem 0.7rem; }
+
+/* explanations: dotted underline = tap for text; ⓘ next to switches and selects */
+html.touch th[title], html.touch td[title], html.touch span[title], html.touch small[title], html.touch strong[title] {
+  text-decoration: underline dotted; text-decoration-color: var(--text-muted); text-underline-offset: 3px;
+}
+.tipBtn {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 30px; height: 30px; min-height: 30px !important; margin-left: 0.35rem; padding: 0;
+  border: 1.5px solid var(--accent); border-radius: 50%; background: var(--surface); color: var(--accent);
+  font: italic 700 0.85rem Georgia, "Times New Roman", serif; line-height: 1; cursor: pointer;
+}
+.tipBtn:active { background: var(--accent-soft); }
+
+/* wide tables scroll inside their own box */
+.tableScroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0.5rem 0 1.5rem; }
+.tableScroll > table { margin: 0; }
+
+/* file picker */
+html.touch .dropHint { display: none; }
+html.touch .tapHint { display: inline; }
+html.touch #dropZone { padding: 1.6rem 1rem; }
+html.touch .fileBtn {
+  display: inline-block; margin-top: 0.7rem; padding: 0.8rem 1.6rem; border-radius: var(--radius-sm);
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 1.05rem; cursor: pointer;
+}
+html.touch .fileBtn:active { background: var(--accent-hover); }
+html.touch #dropZone input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+
+/* layer viewer on a tablet in portrait: 2D and 3D side by side, 3D controls in a row below */
+@media (pointer: coarse) and (max-width: 1100px) {
+  .layerViews { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .layerViews .laue3dSide { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 0.6rem 1.4rem; padding-top: 0; }
+  .viewModalBody .laue3dSide { flex-direction: column; }
+}
+@media (pointer: coarse) and (max-width: 640px) {
+  .layerViews { grid-template-columns: minmax(0, 1fr); }
+}
+/* layer pictures: one finger sideways changes the layer, so no text selection or callout */
+html.touch #layerCanvas, html.touch .bzCanvas, html.touch .laue3dOverlay { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+html.touch .sgDiagram { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }

@@ -150,12 +150,27 @@ function initBijvoetZones(container, cell, check) {
   const step = d => { _bz.n = Math.max(Number(els.slider.min), Math.min(Number(els.slider.max), _bz.n + d)); els.slider.value = _bz.n; bzRefresh(); };
   q('.bzPrev').addEventListener('click', () => step(-1));
   q('.bzNext').addEventListener('click', () => step(1));
-  els.canvas.addEventListener('mousemove', e => {
+  const bzHit = e => {
     const b = els.canvas.getBoundingClientRect(), sc = 420 / b.width;
     const x = (e.clientX - b.left) * sc, y = (e.clientY - b.top) * sc;
-    const it = _bz.hit.find(t => Math.hypot(t.x - x, t.y - y) <= Math.max(t.r + 2, 5));
-    if (it) showReflectionTip(`<strong>${it.p.h.join(' ')}</strong>${it.p.generated ? ' <small>(not in the data, from an equivalent)</small>' : ''}<br>(I(h) − I(−h))/σ = <strong>${it.p.z.toFixed(2)}</strong>`, e.clientX, e.clientY, false);
+    const slop = typeof touchInput === 'function' && touchInput() ? touchSlop(5) * sc : 5;
+    let best = null, bestD = Infinity;
+    for (const t of _bz.hit) { const d = Math.hypot(t.x - x, t.y - y); if (d <= Math.max(t.r + 2, slop) && d < bestD) { best = t; bestD = d; } }
+    return best;
+  };
+  const bzTipHtml = it => `<strong>${it.p.h.join(' ')}</strong>${it.p.generated ? ' <small>(not in the data, from an equivalent)</small>' : ''}<br>(I(h) − I(−h))/σ = <strong>${it.p.z.toFixed(2)}</strong>`;
+  els.canvas.addEventListener('mousemove', e => {
+    if (typeof touchInput === 'function' && touchInput()) return;
+    const it = bzHit(e);
+    if (it) showReflectionTip(bzTipHtml(it), e.clientX, e.clientY, false);
     else hideReflectionTip(false);
+  });
+  const wasSwipe = typeof attachSwipeStep === 'function' ? attachSwipeStep(els.canvas, d => { step(d); hideInfoBar('refl'); }) : null;
+  els.canvas.addEventListener('click', e => {
+    if (wasSwipe && wasSwipe()) return;
+    const it = bzHit(e);
+    if (it) showReflectionTip(bzTipHtml(it), e.clientX, e.clientY, true);
+    else if (typeof touchInput === 'function' && touchInput()) hideInfoBar('refl');
   });
   els.canvas.addEventListener('mouseleave', () => hideReflectionTip(false));
   if (!_bz.themeHooked) { _bz.themeHooked = true; onPlotThemeChange(() => { if (_bz.els && _bz.els.canvas.isConnected) bzRefresh(); }); }
