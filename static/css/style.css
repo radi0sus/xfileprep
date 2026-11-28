@@ -671,7 +671,10 @@ html.touch th[title], html.touch td[title], html.touch span[title], html.touch s
 }
 .tipBtn {
   display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
-  width: 30px; height: 30px; min-height: 30px !important; margin-left: 0.35rem; padding: 0;
+  /* fixed circle: other button rules (e.g. .laue3dGroup button { min-width }) must not stretch it */
+  width: 30px !important; height: 30px !important; min-width: 30px !important; max-width: 30px !important;
+  min-height: 30px !important; max-height: 30px !important; aspect-ratio: 1 / 1;
+  margin-left: 0.35rem; padding: 0 !important; box-sizing: border-box;
   border: 1.5px solid var(--accent); border-radius: 50%; background: var(--surface); color: var(--accent);
   font: italic 700 0.85rem Georgia, "Times New Roman", serif; line-height: 1; cursor: pointer;
 }
